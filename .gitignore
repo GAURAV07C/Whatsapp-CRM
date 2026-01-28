@@ -1,0 +1,5 @@
+node_modules
+.github
+.wwebjs_auth
+.wwebjs_cache
+.env

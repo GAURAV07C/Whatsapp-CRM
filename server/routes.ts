@@ -1,0 +1,502 @@
+import type { Express } from "express";
+import { createServer, type Server } from "http";
+import { storage } from "./storage";
+import { api, errorSchemas } from "@shared/routes";
+import { z } from "zod";
+import { setupSocket, setIo } from "./socket";
+import { WhatsAppManager } from "./whatsapp";
+import { auth } from "./middleware/auth";
+
+export async function registerRoutes(
+  httpServer: Server,
+  app: Express,
+): Promise<Server> {
+  const io = setupSocket(httpServer);
+  setIo(io);
+
+  // === SEED DATA ===
+  async function seed() {
+    // Check if tenant with specific publicKey exists
+    const existing = await storage.getTenantByPublicKey("mo-public-key-123");
+    if (!existing) {
+      console.log("Seeding database...");
+      // Create Demo Tenant
+      const tenant = await storage.createTenant({
+        name: "Demo Company",
+        publicKey: "mo-public-key-123",
+        config: {
+          themeColor: "#25D366",
+          greetingMessage: "Hi there! How can we help?",
+          agentName: "Support Team",
+        },
+        allowedDomains: ["*"],
+      });
+
+      // Create Admin Agent
+      await storage.createAgent({
+        tenantId: tenant.id,
+        username: "admin",
+        password: "password", // In real app, hash this!
+        role: "admin",
+      });
+      console.log("Seeding complete. User: admin / password");
+    }
+  }
+  seed();
+
+  // === AUTH API ===
+  app.post("/api/auth/signup", async (req, res) => {
+    try {
+      const { name, username, password } = req.body;
+
+      const existing = await storage.getAgentByUsername(username);
+      if (existing) {
+        return res.status(400).json({ message: "Username already exists" });
+      }
+
+      const tenant = await storage.createTenant({
+        name,
+        publicKey: `pk_${Math.random().toString(36).substring(2, 11)}`,
+        config: {
+          themeColor: "#25D366",
+          greetingMessage: "Hi there! How can we help?",
+          agentName: "Support Team",
+        },
+        allowedDomains: ["*"],
+      });
+
+      const agent = await storage.createAgent({
+        tenantId: tenant.id,
+        username,
+        password, // In real app, hash this!
+        role: "admin",
+      });
+
+      res.status(201).json({ agent, tenant });
+    } catch (err) {
+      res.status(400).json({ message: "Invalid input" });
+    }
+  });
+
+  app.post(api.auth.login.path, async (req, res) => {
+    try {
+      const { username, password } = api.auth.login.input.parse(req.body);
+      const agent = await storage.getAgentByUsername(username);
+
+      if (!agent || agent.password !== password) {
+        return res.status(401).json({ message: "Invalid credentials" });
+      }
+
+      const tenant = await storage.getTenant(agent.tenantId);
+      if (!tenant) return res.status(401).json({ message: "Tenant not found" });
+
+      // In real app, generate JWT. For demo, return simple token (username)
+      // and client can store it.
+      res.json({
+        token: Buffer.from(
+          JSON.stringify({
+            agentId: agent.id,
+            tenantId: tenant.id,
+            tenantPublicKey: tenant.publicKey,
+          }),
+        ).toString("base64"),
+        agent,
+        tenant,
+      });
+      console.log("Login successful for user:", tenant.publicKey);
+    } catch (err) {
+      res.status(400).json({ message: "Invalid input" });
+    }
+  });
+
+  app.get(api.auth.me.path, auth, async (req, res) => {
+    const agent = await storage.getAgent(req.user!.agentId);
+    if (!agent) return res.status(404).json({ message: "Agent not found" });
+
+    res.json({
+      agentId: req.user!.agentId,
+      username: req.user!.username,
+      tenantId: req.user!.tenantId,
+      publicKey: req.user!.publicKey,
+      role: agent.role,
+    });
+  });
+
+  // Protect all routes below
+  // === WHATSAPP API ===
+  app.get("/api/whatsapp/debug/:agentId", auth, async (req, res) => {
+    const agentId = parseInt(
+      Array.isArray(req.params.agentId)
+        ? req.params.agentId[0]
+        : req.params.agentId || "",
+    );
+    const debug = await WhatsAppManager.debugClient(agentId);
+    res.json(debug);
+  });
+
+  app.get(api.whatsapp.status.path, auth, async (req, res) => {
+    // Mock Auth Check
+    // In real app, verify JWT from headers
+    const agentId = req.user!.agentId;
+    const tenantId = req.user!.tenantId;
+
+    console.log(
+      `🔍 WhatsApp status check for agent ${agentId}, tenant ${tenantId}`,
+    );
+
+    const tenant = await storage.getTenant(tenantId);
+    if (!tenant) return res.status(404).json({ message: "Tenant not found" });
+
+    // Always try to initialize/get client for this agent
+    console.log(`🚀 Ensuring WhatsApp client for agent ${agentId}`);
+    const clientStatus = WhatsAppManager.getStatus(agentId);
+    console.log(`📊 Client status for agent ${agentId}: ${clientStatus}`);
+
+    // Trigger QR generation if disconnected
+    let qr = undefined;
+    if (tenant.whatsappStatus !== "connected") {
+      console.log(`📸 Getting QR code for agent ${agentId}`);
+      const qrCode = await WhatsAppManager.getQrCode(agentId);
+      console.log(`📸 QR result: ${qrCode ? "Got QR" : "No QR needed"}`);
+      if (qrCode && qrCode !== "initializing") {
+        qr = qrCode;
+      }
+    }
+
+    res.json({
+      status: tenant.whatsappStatus as any,
+      qr,
+    });
+  });
+  // app.use();
+  app.post(api.whatsapp.logout.path, auth, async (req, res) => {
+    const tenantId = req.user!.tenantId; // Hardcoded for demo
+    console.log("Logging out tenantId", req.user);
+    await WhatsAppManager.logout(tenantId);
+    res.json({ success: true });
+  });
+
+  // === CHATS API ===
+  app.get(api.chats.list.path, auth, async (req, res) => {
+    console.log("tenantId", req.user);
+    const tenantId = req.user!.tenantId; // Hardcoded
+    const chats = await storage.getChats(tenantId);
+    console.log("@@🌹💖👍", chats);
+    res.json(chats);
+  });
+
+  app.post(api.chats.create.path, auth, async (req, res) => {
+    const tenantId = req.user!.tenantId;
+    const { remoteJid, customerName } = api.chats.create.input.parse(req.body);
+
+    const chat = await storage.createChat({
+      tenantId,
+      remoteJid,
+      customerName,
+    });
+
+    res.status(201).json(chat);
+  });
+
+  app.get(api.chats.get.path, auth, async (req, res) => {
+    res.set("Cache-Control", "no-store");
+    const id = parseInt(
+      Array.isArray(req.params.id) ? req.params.id[0] : req.params.id,
+    );
+    const chat = await storage.getChat(id);
+    if (!chat) return res.status(404).json({ message: "Chat not found" });
+
+    const messages = await storage.getMessages(id);
+    console.log("💕💕 api.chats.get.path", messages);
+    res.json({ ...chat, messages });
+  });
+
+  app.post(api.chats.sendMessage.path, auth, async (req, res) => {
+    const chatId = parseInt(
+      Array.isArray(req.params.id) ? req.params.id[0] : req.params.id,
+    );
+    const { content } = api.chats.sendMessage.input.parse(req.body);
+
+    console.log(
+      `📤 DEBUG: Message send request received from client - Chat ID: ${chatId}, Content: "${content}"`,
+    );
+
+    const chat = await storage.getChat(chatId);
+    if (!chat) return res.status(404).json({ message: "Chat not found" });
+
+    // Send via WhatsApp Client using agent ID
+    const client = await WhatsAppManager.getClient(req.user!.agentId);
+    if (client) {
+      try {
+        // Check if client is ready
+        const state = await client.getState();
+        if (state !== "CONNECTED") {
+          console.warn(`⚠️ WhatsApp client not connected. State: ${state}`);
+          return res
+            .status(503)
+            .json({ message: "WhatsApp client not connected" });
+        }
+
+        // Add small delay to ensure stability
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+
+        // Try to get the chat first to ensure it exists
+        const whatsappChat = await client.getChatById(chat.remoteJid);
+        if (!whatsappChat) {
+          console.warn(`⚠️ Chat ${chat.remoteJid} not found in WhatsApp`);
+          return res
+            .status(404)
+            .json({ message: "Chat not found in WhatsApp" });
+        }
+
+        await client.sendMessage(chat.remoteJid, content, { sendSeen: false });
+        console.log(`✅ Message sent to ${chat.remoteJid}: ${content}`);
+      } catch (error) {
+        console.error(`❌ Failed to send message to ${chat.remoteJid}:`, error);
+
+        // Check if it's a common whatsapp-web.js error
+        if (
+          error instanceof Error &&
+          error.message &&
+          error.message.includes("markedUnread")
+        ) {
+          console.warn(
+            `⚠️ WhatsApp Web session issue detected. Client may need re-authentication.`,
+          );
+          return res.status(503).json({
+            message: "WhatsApp session needs refresh. Please re-scan QR code.",
+            code: "SESSION_EXPIRED",
+          });
+        }
+
+        return res
+          .status(500)
+          .json({ message: "Failed to send message via WhatsApp" });
+      }
+    } else {
+      console.warn(
+        `⚠️ No WhatsApp client available for agent ${req.user!.agentId}`,
+      );
+      return res.status(503).json({ message: "WhatsApp client not available" });
+    }
+
+    const message = await storage.createMessage({
+      chatId,
+      tenantId: chat.tenantId,
+      content,
+      type: "text",
+      fromMe: true,
+      senderName: "Agent",
+    });
+
+    res.status(201).json(message);
+  });
+
+  app.delete(api.chats.delete.path, auth, async (req, res) => {
+    const chatId = parseInt(
+      Array.isArray(req.params.id) ? req.params.id[0] : req.params.id,
+    );
+    const tenantId = req.user!.tenantId;
+
+    const chat = await storage.getChat(chatId);
+    if (!chat) return res.status(404).json({ message: "Chat not found" });
+
+    // Ensure chat belongs to the user's tenant
+    if (chat.tenantId !== tenantId) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    await storage.deleteChat(chatId);
+    res.json({ success: true });
+  });
+
+  // === WIDGET API ===
+  app.get(api.widget.config.path, async (req, res) => {
+    const publicKey = req.query.publicKey as string;
+    const origin = req.headers.origin; // 🔥 IMPORTANT
+
+    console.log("Widget Config Request Received", req.query);
+    console.log("Origin:", origin);
+    console.log("publicKey:", publicKey);
+
+    if (!publicKey) {
+      return res.status(400).json({ message: "Missing public key" });
+    }
+
+    const tenant = await storage.getTenantByPublicKey(publicKey);
+
+    if (!tenant) {
+      return res.status(404).json({ message: "Tenant not found" });
+    }
+
+    // 👇 allowed domains from tenant.allowedDomains
+    const allowedDomains: string[] =
+      (tenant.allowedDomains as string[] | undefined) || [];
+
+    /**
+     * CASE 1: SaaS wants to allow EVERYWHERE (open widget)
+     */
+    if (allowedDomains.includes("*") && origin) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+    }
+
+    /**
+     * CASE 2: Restricted domains
+     */
+    if (origin && allowedDomains.length > 0 && !allowedDomains.includes("*")) {
+      if (!allowedDomains.includes(origin)) {
+        return res.status(403).json({
+          message: "Origin not allowed",
+        });
+      }
+
+      res.setHeader("Access-Control-Allow-Origin", origin);
+    }
+
+    // Common CORS headers
+    res.setHeader(
+      "Access-Control-Allow-Headers",
+      "Content-Type, Authorization",
+    );
+    res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+
+    res.json({
+      tenantId: tenant.id,
+      name: tenant.name,
+      config: tenant.config,
+      whatsappStatus: tenant.whatsappStatus || "disconnected",
+    });
+  });
+
+  app.get(api.widget.agents.path, async (req, res) => {
+    const publicKey = req.query.publicKey as string;
+    const origin = req.headers.origin;
+
+    if (!publicKey) {
+      return res.status(400).json({ message: "Missing public key" });
+    }
+
+    const tenant = await storage.getTenantByPublicKey(publicKey);
+    if (!tenant) {
+      return res.status(404).json({ message: "Tenant not found" });
+    }
+
+    // CORS handling (same as config)
+    const allowedDomains: string[] = (tenant.allowedDomains as string[]) || [];
+    if (allowedDomains.includes("*") && origin) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+    }
+    if (origin && allowedDomains.length > 0 && !allowedDomains.includes("*")) {
+      if (!allowedDomains.includes(origin)) {
+        return res.status(403).json({ message: "Origin not allowed" });
+      }
+      res.setHeader("Access-Control-Allow-Origin", origin);
+    }
+    res.setHeader(
+      "Access-Control-Allow-Headers",
+      "Content-Type, Authorization",
+    );
+    res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+
+    const agents = await storage.getAgentsByTenantId(tenant.id);
+    res.json(agents);
+  });
+
+  app.get(api.widget.qr.path, async (req, res) => {
+    const agentId = parseInt(
+      Array.isArray(req.params.agentId)
+        ? req.params.agentId[0]
+        : req.params.agentId,
+    );
+    const origin = req.headers.origin;
+
+    const agent = await storage.getAgent(agentId);
+    if (!agent) {
+      return res.status(404).json({ message: "Agent not found" });
+    }
+
+    const tenant = await storage.getTenant(agent.tenantId);
+    if (!tenant) {
+      return res.status(404).json({ message: "Tenant not found" });
+    }
+
+    // CORS handling
+    const allowedDomains: string[] = (tenant.allowedDomains as string[]) || [];
+    if (allowedDomains.includes("*") && origin) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+    }
+    if (origin && allowedDomains.length > 0 && !allowedDomains.includes("*")) {
+      if (!allowedDomains.includes(origin)) {
+        return res.status(403).json({ message: "Origin not allowed" });
+      }
+      res.setHeader("Access-Control-Allow-Origin", origin);
+    }
+    res.setHeader(
+      "Access-Control-Allow-Headers",
+      "Content-Type, Authorization",
+    );
+    res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+
+    const qr = await WhatsAppManager.getQrCode(agentId);
+    const status = WhatsAppManager.getStatus(agentId);
+
+    res.json({
+      qr,
+      status,
+    });
+  });
+
+  // === TENANT API ===
+  app.get("/api/tenant/:id", auth, async (req, res) => {
+    const tenantId = parseInt(
+      Array.isArray(req.params.id) ? req.params.id[0] : req.params.id,
+    );
+    if (req.user!.tenantId !== tenantId) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    const tenant = await storage.getTenant(tenantId);
+    if (!tenant) {
+      return res.status(404).json({ message: "Tenant not found" });
+    }
+
+    res.json(tenant);
+  });
+
+  // === TENANT CONFIG API ===
+  app.put(api.tenant.updateConfig.path, auth, async (req, res) => {
+    const tenantId = req.user!.tenantId;
+    const updates = api.tenant.updateConfig.input.parse(req.body);
+
+    const tenant = await storage.getTenant(tenantId);
+    if (!tenant) {
+      return res.status(404).json({ message: "Tenant not found" });
+    }
+
+    // Update config
+    const newConfig = {
+      ...tenant.config,
+      ...updates,
+    };
+
+    // Update allowedDomains separately
+    const newAllowedDomains =
+      updates.allowedDomains !== undefined
+        ? updates.allowedDomains
+        : tenant.allowedDomains;
+
+    await storage.updateTenantConfigAndDomains(
+      tenantId,
+      newConfig,
+      newAllowedDomains as string[],
+    );
+
+    res.json({
+      success: true,
+      config: newConfig,
+      allowedDomains: newAllowedDomains,
+    });
+  });
+
+  return httpServer;
+}
