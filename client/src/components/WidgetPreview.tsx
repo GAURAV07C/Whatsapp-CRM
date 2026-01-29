@@ -10,12 +10,14 @@ interface WidgetPreviewProps {
 
 export function WidgetPreview({ publicKey }: WidgetPreviewProps) {
   const { data, isLoading } = useWidgetConfig(publicKey);
+  console.log("💖 Widget config data in preview:", data);
   const [isOpen, setIsOpen] = useState(false);
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState<{ id: number; text: string; isUser: boolean }[]>([
     { id: 1, text: "Hello! Is this service available in my region?", isUser: true },
     { id: 2, text: "Hi there! Yes, we operate globally. How can I help you today?", isUser: false },
   ]);
+  
 
   if (isLoading) return <div className="p-4 text-sm text-muted-foreground">Loading widget preview...</div>;
 

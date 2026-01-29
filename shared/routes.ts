@@ -185,6 +185,44 @@ export const api = {
         404: errorSchemas.notFound,
       },
     },
+    chats: {
+      list: {
+        method: "GET" as const,
+        path: "/api/widget/chats",
+        input: z.object({
+          publicKey: z.string(),
+        }),
+        responses: {
+          200: z.array(z.custom<typeof chats.$inferSelect>()),
+        },
+      },
+      get: {
+        method: "GET" as const,
+        path: "/api/widget/chats/:id",
+        input: z.object({
+          publicKey: z.string(),
+        }),
+        responses: {
+          200: z.custom<
+            typeof chats.$inferSelect & {
+              messages: (typeof messages.$inferSelect)[];
+            }
+          >(),
+          404: errorSchemas.notFound,
+        },
+      },
+      sendMessage: {
+        method: "POST" as const,
+        path: "/api/widget/chats/:id/messages",
+        input: z.object({
+          publicKey: z.string(),
+          content: z.string(),
+        }),
+        responses: {
+          201: z.custom<typeof messages.$inferSelect>(),
+        },
+      },
+    },
   },
 
   // === TENANT CONFIG ===
