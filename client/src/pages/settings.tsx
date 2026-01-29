@@ -56,7 +56,12 @@ export default function SettingsPage() {
       setGreetingMessage(
         config.greetingMessage || "Hello! How can we help you?",
       );
-      setAllowedDomains(((tenant.allowedDomains as string[] | undefined) || []).join("\n"));
+      const domains = Array.isArray(tenant.allowedDomains)
+        ? tenant.allowedDomains
+        : typeof tenant.allowedDomains === 'string'
+        ? JSON.parse(tenant.allowedDomains)
+        : [];
+      setAllowedDomains(domains.join("\n"));
     }
   }, [tenant]);
 

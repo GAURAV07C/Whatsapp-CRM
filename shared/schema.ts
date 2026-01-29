@@ -34,7 +34,7 @@ export const tenants = mysqlTable("tenants", {
       agentName: "Support Agent",
     }), // default empty JSON, populate defaults in code if needed
 
-  allowedDomains: json("allowed_domains").default("[]"), // MySQL does not support array type
+  allowedDomains: json("allowed_domains").$type<string[]>().default([]), // MySQL does not support array type
   whatsappStatus: text("whatsapp_status").default("disconnected"), // disconnected, connected, qr_ready
   createdAt: timestamp("created_at").defaultNow(),
 });
