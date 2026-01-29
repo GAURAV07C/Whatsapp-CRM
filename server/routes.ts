@@ -140,9 +140,16 @@ export async function registerRoutes(
     const agentId = req.user!.agentId;
     const tenantId = req.user!.tenantId;
 
+    const debugInfo = await WhatsAppManager.debugClient(agentId);
+    console.log("🧪 WhatsApp DEBUG INFO:", debugInfo);
+
     console.log(
       `🔍 WhatsApp status check for agent ${agentId}, tenant ${tenantId}`,
     );
+
+    // 🔥 ADD THIS
+    // const debugInfo = await WhatsAppManager.debugClient(agentId);
+    // console.log("🧪 WhatsApp DEBUG INFO:", debugInfo);
 
     const tenant = await storage.getTenant(tenantId);
     if (!tenant) return res.status(404).json({ message: "Tenant not found" });
@@ -170,19 +177,53 @@ export async function registerRoutes(
   });
   // app.use();
   app.post(api.whatsapp.logout.path, auth, async (req, res) => {
-    const tenantId = req.user!.tenantId; // Hardcoded for demo
-    console.log("Logging out tenantId", req.user);
-    await WhatsAppManager.logout(tenantId);
+    const agentId = req.user!.agentId;
+    console.log("Logging out agentId", agentId);
+    await WhatsAppManager.logout(agentId);
     res.json({ success: true });
   });
 
   // === CHATS API ===
+  // app.get(api.chats.list.path, auth, async (req, res) => {
+  //   console.log("tenantId", req.user);
+  //   const tenantId = req.user!.tenantId; // Hardcoded
+
+  //   const chats = await storage.getChats(tenantId);
+  //   console.log("@@🌹💖👍", chats);
+  //   res.json(chats);
+  // });
+
   app.get(api.chats.list.path, auth, async (req, res) => {
-    console.log("tenantId", req.user);
-    const tenantId = req.user!.tenantId; // Hardcoded
-    const chats = await storage.getChats(tenantId);
-    console.log("@@🌹💖👍", chats);
-    res.json(chats);
+    
+    const tenantId = req.user!.tenantId;
+
+    const chatsWithMessages = await storage.getChatsWithLatestMessage(tenantId);
+
+    // Simulate message event for logs / socket
+    chatsWithMessages.forEach((chat) => {
+      if (chat.lastMessageId) {
+        console.log("🔥 [SIMULATED MESSAGE EVENT]");
+        console.log({
+          chatId: chat.chatId,
+          from: chat.remoteJid,
+          body: chat.lastMessageBody,
+          type: chat.lastMessageType,
+          fromMe: chat.lastMessageFromMe,
+          timestamp: chat.lastMessageTimestamp,
+        });
+
+        // Optional: emit to socket too
+        io.to(`tenant_${tenantId}`).emit("new_message", {
+          chatId: chat.chatId,
+          content: chat.lastMessageBody,
+          type: chat.lastMessageType,
+          fromMe: chat.lastMessageFromMe,
+          timestamp: chat.lastMessageTimestamp,
+        });
+      }
+    });
+
+    res.json(chatsWithMessages);
   });
 
   app.post(api.chats.create.path, auth, async (req, res) => {

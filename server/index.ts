@@ -2,9 +2,50 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
+import { WhatsAppManager } from "./whatsapp";
+import { storage } from "./storage";
+
 import cors from "cors";
 const app = express();
 const httpServer = createServer(app);
+await registerRoutes(httpServer, app);
+// 🔥 AUTO BOOTSTRAP WHATSAPP CLIENTS
+
+async function startWhatsApp() {
+  const agentId = 3;
+  const client = await WhatsAppManager.getClient(agentId);
+
+  if (!client) {
+    console.error("❌ Failed to initialize WhatsApp client.");
+    return;
+  }
+
+  console.log("✅ WhatsApp client initialized for agent", agentId);
+
+  // ready event will fire automatically when WhatsApp is ready
+  // no need to emit manually
+
+  // You can still attach additional logs for debugging if needed
+  client.on("ready", () => {
+    console.log("✅ WhatsApp client is READY to receive messages!");
+  });
+
+  client.on("message", async (msg) => {
+    console.log("🔥 MESSAGE RECEIVED!");
+    console.log(`From: ${msg.from}`);
+    console.log(`Body: ${msg.body}`);
+
+    // Optionally handle media, save to DB, emit to socket, etc.
+    const contact = await msg.getContact();
+    const chat = await msg.getChat();
+    console.log(`Contact: ${contact.pushname} (${contact.number})`);
+    console.log(`Chat ID: ${chat.id}`);
+  });
+}
+
+// 4️⃣ Run the test
+// 🔥 AUTO BOOTSTRAP WHATSAPP CLIENTS
+startWhatsApp().catch(console.error);
 
 declare module "http" {
   interface IncomingMessage {

@@ -50,6 +50,11 @@ export interface IStorage {
 }
 
 export class DatabaseStorage implements IStorage {
+
+  async getAllAgents() {
+  return await db.select().from(agents);
+}
+
   // Tenants
   async getTenant(id: number): Promise<Tenant | undefined> {
     const [tenant] = await db.select().from(tenants).where(eq(tenants.id, id));
@@ -160,6 +165,27 @@ export class DatabaseStorage implements IStorage {
       .where(eq(chats.tenantId, tenantId))
       .orderBy(desc(chats.lastMessageAt));
   }
+
+  async getChatsWithLatestMessage(tenantId: number) {
+  const chatsData = await db
+    .select({
+      chatId: chats.id,
+      remoteJid: chats.remoteJid,
+      lastMessageId: messages.id,
+      lastMessageBody: messages.content,
+      lastMessageType: messages.type,
+      lastMessageFromMe: messages.fromMe,
+      lastMessageTimestamp: messages.timestamp,
+    })
+    .from(chats)
+    .leftJoin(messages, eq(messages.chatId, chats.id))
+    .where(eq(chats.tenantId, tenantId))
+    .orderBy(desc(messages.timestamp));
+
+  return chatsData;
+}
+
+
 
   async getChat(id: number): Promise<Chat | undefined> {
     const [chat] = await db.select().from(chats).where(eq(chats.id, id));

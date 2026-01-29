@@ -13,6 +13,7 @@ const clients = new Map<number, InstanceType<typeof Client>>();
 const qrCodes = new Map<number, string>();
 const initializingAgents = new Set<number>();
 const clientStatus = new Map<number, string>();
+const messageListenerAttached = new Set<number>();
 
 export class WhatsAppManager {
   /**
@@ -53,7 +54,7 @@ export class WhatsAppManager {
         clientId: `agent-${agentId}`,
       }),
       puppeteer: {
-        headless: true,
+        headless: false,
         args: ["--no-sandbox", "--disable-setuid-sandbox"],
       },
     });
@@ -62,6 +63,7 @@ export class WhatsAppManager {
      * QR EVENT
      */
     client.on("qr", async (qr) => {
+      console.log(`� QR event trigger and received for agent ${agentId}`);
       const agent = await storage.getAgent(agentId);
       if (!agent) {
         console.error(`Agent ${agentId} not found`);
@@ -124,7 +126,10 @@ export class WhatsAppManager {
     /**
      * READY EVENT
      */
+
     client.on("ready", async () => {
+      clientStatus.set(agentId, "connected");
+
       console.log(`✅ WhatsApp ready for agent ${agentId}`);
       qrCodes.delete(agentId);
       clientStatus.set(agentId, "connected");
@@ -143,12 +148,10 @@ export class WhatsAppManager {
     /**
      * MESSAGE EVENT
      */
+
     console.log(`🎧 [AGENT ${agentId}] Setting up message event listener`);
+
     client.on("message", async (msg) => {
-      // <<<<<<< HEAD
-      console.log("💕❤🎁");
-      // =======
-      // >>>>>>> ed61ec9f205873f7f6b98aa9252c1ae455f442b3
       console.log(`🔥 [AGENT ${agentId}] MESSAGE EVENT TRIGGERED!`);
       console.log(`   Raw message data:`, {
         from: msg.from,
@@ -265,6 +268,16 @@ export class WhatsAppManager {
         console.error("❌ Message handling error:", err);
       }
     });
+
+    // if (!messageListenerAttached.has(agentId)) {
+    //   console.log(`🎧 Attaching message listener for agent ${agentId}`);
+
+    //   client.on("message", async (msg: { body: any }) => {
+    //     console.log(`🔥 MESSAGE RECEIVED FOR AGENT ${agentId}:`, msg.body);
+    //   });
+
+    //   messageListenerAttached.add(agentId); // ✅ THIS WAS MISSING
+    // }
 
     /**
      * DISCONNECT EVENT
