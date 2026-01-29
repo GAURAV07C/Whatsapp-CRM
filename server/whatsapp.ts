@@ -145,10 +145,10 @@ export class WhatsAppManager {
      */
     console.log(`🎧 [AGENT ${agentId}] Setting up message event listener`);
     client.on("message", async (msg) => {
-// <<<<<<< HEAD
+      // <<<<<<< HEAD
       console.log("💕❤🎁");
-// =======
-// >>>>>>> ed61ec9f205873f7f6b98aa9252c1ae455f442b3
+      // =======
+      // >>>>>>> ed61ec9f205873f7f6b98aa9252c1ae455f442b3
       console.log(`🔥 [AGENT ${agentId}] MESSAGE EVENT TRIGGERED!`);
       console.log(`   Raw message data:`, {
         from: msg.from,
@@ -247,24 +247,12 @@ export class WhatsAppManager {
           `   🔄 DEBUG: About to emit new_message to room tenant_${tenantId}`,
         );
         io.to(`tenant_${tenantId}`).emit("new_message", {
-<<<<<<< HEAD
-        
-=======
-          chatId: dbChat.id,
->>>>>>> ed61ec9f205873f7f6b98aa9252c1ae455f442b3
           ...message,
           media,
         });
         io.to(`agent_${agentId}`).emit("new_message", {
-<<<<<<< HEAD
-        
           ...message,
           media,
-=======
-          chatId: dbChat.id,
-          ...message,
-          media
->>>>>>> ed61ec9f205873f7f6b98aa9252c1ae455f442b3
         });
 
         console.log(`   ✅ DEBUG: Emitted new_message successfully`);
