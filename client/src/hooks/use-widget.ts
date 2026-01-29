@@ -18,6 +18,11 @@ export function useWidgetConfig(publicKey: string) {
 
       if (!res.ok) throw new Error("Failed to fetch widget config");
 
+      // Parse config if it's a string (database stores JSON as string)
+      if (typeof json.config === 'string') {
+        json.config = JSON.parse(json.config);
+      }
+
       // ✅ PARSE THE SAME JSON
       return api.widget.config.responses[200].parse(json);
     },
