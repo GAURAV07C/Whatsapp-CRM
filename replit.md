@@ -69,8 +69,8 @@ Socket.IO handles:
 ## External Dependencies
 
 ### Database
-- **mySQL**: Primary data store, connection via `DATABASE_URL` environment variable
-- **connect-pg-simple**: Session storage in mySQL
+- **mySQL**: Primary data store, connection via `MYSQL_URL` environment variable (Note: `DATABASE_URL` is reserved by Replit for its built-in PostgreSQL)
+- **Session storage**: In-memory via memorystore
 
 ### WhatsApp Integration
 - **whatsapp-web.js**: Unofficial WhatsApp Web API client

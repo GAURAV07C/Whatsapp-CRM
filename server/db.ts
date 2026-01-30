@@ -9,10 +9,18 @@ import * as schema from "@shared/schema";
 
 async function initDB() {
   // MySQL connection using URL
-  const connectionUrl = process.env.DATABASE_URL!
+  let connectionUrl = process.env.MYSQL_URL!
+  
+  // Remove ssl-mode parameter as mysql2 doesn't support it in URL
+  // and add proper SSL config
+  connectionUrl = connectionUrl.replace(/[?&]ssl-mode=[^&]*/gi, '');
 
-
-  const connection = await mysql.createConnection(connectionUrl);
+  const connection = await mysql.createConnection({
+    uri: connectionUrl,
+    ssl: {
+      rejectUnauthorized: false
+    }
+  });
 
   console.log("✅ Database connected successfully!");
 
