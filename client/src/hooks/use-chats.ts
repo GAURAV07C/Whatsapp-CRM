@@ -38,7 +38,10 @@ export function useCreateChat() {
       remoteJid: string;
       customerName?: string;
     }) => {
-      const validated = api.chats.create.input.parse({ remoteJid, customerName });
+      const validated = api.chats.create.input.parse({
+        remoteJid,
+        customerName,
+      });
 
       const res = await authFetch(api.chats.create.path, {
         method: api.chats.create.method,
@@ -79,11 +82,7 @@ export function useSendMessage() {
       });
 
       if (!res.ok) throw new Error("Failed to send message");
-      return api.chats.sendMessage.responses[201].parse(await res.json());
-    },
-    onSuccess: (_, { chatId }) => {
-      queryClient.invalidateQueries({ queryKey: [api.chats.get.path, chatId] });
-      queryClient.invalidateQueries({ queryKey: [api.chats.list.path] });
+      return res.json();
     },
   });
 }
@@ -92,26 +91,31 @@ export function useDeleteChat() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (chatId: number) => {
-      console.log('Attempting to delete chat:', chatId);
-      const response = await authFetch(buildUrl(api.chats.delete.path, { id: chatId }), {
-        method: api.chats.delete.method,
-      });
-      console.log('Delete response status:', response.status);
+      console.log("Attempting to delete chat:", chatId);
+      const response = await authFetch(
+        buildUrl(api.chats.delete.path, { id: chatId }),
+        {
+          method: api.chats.delete.method,
+        },
+      );
+      console.log("Delete response status:", response.status);
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('Delete failed:', errorText);
-        throw new Error(`Failed to delete chat: ${response.status} ${errorText}`);
+        console.error("Delete failed:", errorText);
+        throw new Error(
+          `Failed to delete chat: ${response.status} ${errorText}`,
+        );
       }
       const result = await response.json();
-      console.log('Delete successful:', result);
+      console.log("Delete successful:", result);
       return result;
     },
     onSuccess: () => {
-      console.log('Invalidating chat queries');
+      console.log("Invalidating chat queries");
       queryClient.invalidateQueries({ queryKey: [api.chats.list.path] });
     },
     onError: (error) => {
-      console.error('Delete mutation error:', error);
+      console.error("Delete mutation error:", error);
     },
   });
 }

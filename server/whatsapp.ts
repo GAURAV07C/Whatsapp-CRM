@@ -182,6 +182,7 @@ export class WhatsAppManager {
 
         console.log(`📨 [AGENT ${agentId}] Processing WhatsApp message:`);
         console.log(`   From: ${msg.from} -> Normalized: ${chatId}`);
+        console.log(`   Phone Number (cusId): ${cusId}`);
         console.log(`   Body: "${msg.body}"`);
         console.log(`   Type: ${msg.type}`);
         console.log(`   FromMe: ${msg.fromMe}`);
@@ -193,9 +194,11 @@ export class WhatsAppManager {
         }
         const tenantId = agent.tenantId;
 
+        // 🔍 CRITICAL: Look up chat by BOTH tenantId and chatId (phone number)
+        // This ensures messages from one number don't affect chats from another number
         let dbChat = await storage.getChatByRemoteJid(tenantId, chatId);
         console.log(
-          `   Chat lookup: ${!!dbChat ? "Found existing chat" : "Creating new chat"}`,
+          `   Chat lookup: tenantId=${tenantId}, remoteJid=${chatId} -> ${!!dbChat ? `Found existing chat (ID: ${dbChat.id})` : "Creating new chat"}`,
         );
 
         if (!dbChat) {
@@ -240,22 +243,39 @@ export class WhatsAppManager {
         });
 
         console.log(`   💾 Message saved with ID: ${message.id}`);
-        console.log(`   📤 Emitting to tenant_${tenantId} room`);
-
-        // Emit with media support
+        console.log(`   ✅ Message successfully associated with:`);
+        console.log(`      - Chat ID: ${message.chatId}`);
+        console.log(`      - Tenant ID: ${message.tenantId}`);
+        console.log(`      - Sender: ${message.senderName}`);
         console.log(
-          `   🔄 DEBUG: About to emit new_message to room tenant_${tenantId}`,
+          `   📤 Emitting to rooms: chat_${dbChat.id}, agent_${agentId}`,
         );
-        io.to(`tenant_${tenantId}`).emit("new_message", {
+
+        // Emit with media support - route to specific chat room to prevent mixing messages
+        console.log(
+          `   🔄 DEBUG: About to emit new_message to chat_${dbChat.id} and agent_${agentId}`,
+        );
+
+        // Emit to the specific chat room (for agents viewing that chat AND for widgets)
+        io.to(`chat_${dbChat.id}`).emit("new_message", {
           ...message,
           media,
         });
+
+        // Also emit to agent (for agent-specific notifications)
         io.to(`agent_${agentId}`).emit("new_message", {
           ...message,
           media,
         });
 
+        // Also emit to tenant for chat list updates
+        io.to(`tenant_${tenantId}`).emit("new_message", {
+          ...message,
+          media,
+        });
+
         console.log(`   ✅ DEBUG: Emitted new_message successfully`);
+        io.to(`chat_${dbChat.id}`).emit("chat_update", dbChat);
         io.to(`tenant_${tenantId}`).emit("chat_update", dbChat);
 
         console.log(

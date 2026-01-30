@@ -92,7 +92,7 @@ export default function ChatWidgetPage() {
               className="text-xl font-bold font-display"
               style={{ color: themeColor }}
             >
-              {widgetConfig?.name || "WhatsApp Widget"}
+              {widgetConfig?.name || "krs WhatsApp Widget"}
             </h1>
           </div>
           <div className="relative">
@@ -197,7 +197,7 @@ export default function ChatWidgetPage() {
               <MessageCircle className="h-16 w-16 text-gray-400" />
             </div>
             <h2 className="text-xl font-bold text-gray-700 mb-2">
-              WhatsApp Widget
+              KRS WhatsApp Widget
             </h2>
             <p className="max-w-md text-center mb-8">
               Select a chat from the sidebar to start messaging.

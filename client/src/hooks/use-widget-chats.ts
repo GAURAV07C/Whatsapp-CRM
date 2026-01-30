@@ -108,9 +108,5 @@ export function useWidgetSendMessage(publicKey: string) {
       if (!res.ok) throw new Error("Failed to send message");
       return api.widget.chats.sendMessage.responses[201].parse(await res.json());
     },
-    onSuccess: (_, { chatId }) => {
-      queryClient.invalidateQueries({ queryKey: [api.widget.chats.get.path, publicKey, chatId] });
-      queryClient.invalidateQueries({ queryKey: [api.widget.chats.list.path, publicKey] });
-    },
   });
 }

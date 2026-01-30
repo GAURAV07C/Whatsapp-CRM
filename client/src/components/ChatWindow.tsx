@@ -26,6 +26,8 @@ interface Message {
   timestamp?: string | null;
   type: string | null;
   chatId?: number;
+  isSaving?: boolean;
+  isSaveFailed?: boolean;
 }
 
 interface LocalMessage {
@@ -36,6 +38,8 @@ interface LocalMessage {
   timestamp: string;
   type: string;
   isQueued?: boolean; // Mark messages that are queued for sending
+  isSaving?: boolean;
+  isSaveFailed?: boolean;
 }
 
 type DisplayMessage = Message | LocalMessage;
@@ -60,6 +64,11 @@ export function ChatWindow({
   const [input, setInput] = useState("");
   const [displayMessages, setDisplayMessages] = useState<DisplayMessage[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Reset messages when switching chats
+  useEffect(() => {
+    setDisplayMessages([]);
+  }, [chatId]);
 
   // Initialize and update messages from database on load
   useEffect(() => {
@@ -140,74 +149,87 @@ export function ChatWindow({
     }
   }, [displayMessages]);
 
+  // Handle message saved in background (DB persistence confirmed)
+  useEffect(() => {
+    const handleMessageSaved = (data: { tempId: string; id: number }) => {
+      console.log(
+        `✅ [CLIENT] Message saved to DB: tempId=${data.tempId} -> id=${data.id}`,
+      );
+      setDisplayMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === data.tempId
+            ? { ...msg, id: data.id, isSaving: false, isQueued: false }
+            : msg,
+        ),
+      );
+    };
+
+    const handleMessageSaveError = (data: {
+      tempId: string;
+      error: string;
+    }) => {
+      console.error(`❌ [CLIENT] Failed to save message:`, data);
+      setDisplayMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === data.tempId
+            ? { ...msg, isSaving: false, isSaveFailed: true }
+            : msg,
+        ),
+      );
+    };
+
+    socket.on("message_saved", handleMessageSaved);
+    socket.on("message_save_error", handleMessageSaveError);
+
+    return () => {
+      socket.off("message_saved", handleMessageSaved);
+      socket.off("message_save_error", handleMessageSaveError);
+    };
+  }, []);
+
   const handleSend = (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || isSending) return;
 
     const messageContent = input.trim();
+    const tempMessageId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+    const optimisticMessage: LocalMessage = {
+      id: tempMessageId,
+      content: messageContent,
+      fromMe: true,
+      senderName: isWidget ? "You" : "Agent",
+      timestamp: new Date().toISOString(),
+      type: "text",
+      isQueued: true,
+      isSaving: true,
+    };
+
+    console.log("⚡ [CLIENT] INSTANT: Adding message to UI:", {
+      id: optimisticMessage.id,
+      content: messageContent,
+      isWidget,
+    });
+    setDisplayMessages((prev) => [...prev, optimisticMessage]);
+    setInput("");
 
     if (isWidget && publicKey) {
-      // ⚡ INSTANT UI UPDATE: Add message to UI immediately, clear input
-      const optimisticMessage: LocalMessage = {
-        id: `temp-${Date.now()}`,
-        content: messageContent,
-        fromMe: true,
-        senderName: "You",
-        timestamp: new Date().toISOString(),
-        type: "text",
-        isQueued: true, // Mark as queued for sending
-      };
-
-      console.log("⚡ [CLIENT] INSTANT: Adding message to UI:", optimisticMessage.content);
-      setDisplayMessages((prev) => [...prev, optimisticMessage]);
-      setInput(""); // Clear input immediately
-
-      // 🚀 BACKGROUND PROCESSING: Send via WebSocket asynchronously
-      // Use requestAnimationFrame to ensure UI update happens first
       requestAnimationFrame(() => {
-        console.log("📤 [CLIENT] BACKGROUND: Sending message via WebSocket:", {
-          chatId,
-          content: messageContent,
-          publicKey,
-        });
-
+        console.log(
+          "📤 [CLIENT] BACKGROUND: Sending widget message via WebSocket",
+        );
         socket.emit("send_message", {
           chatId,
           content: messageContent,
           publicKey,
+          tempId: tempMessageId, // Pass the same tempId to prevent duplication
         });
-
-        // Listen for confirmation or error (background processing)
-        const handleMessageSent = (data: { messageId: number }) => {
-          console.log("✅ [CLIENT] BACKGROUND: Message confirmed, updating ID");
-          setDisplayMessages((prev) =>
-            prev.map((msg) =>
-              msg.id === optimisticMessage.id
-                ? { ...msg, id: data.messageId, isQueued: false }
-                : msg
-            )
-          );
-          socket.off("message_sent", handleMessageSent);
-          socket.off("message_error", handleMessageError);
-        };
-
-        const handleMessageError = (error: { error: string }) => {
-          console.error("❌ [CLIENT] BACKGROUND: Message failed, removing:", error);
-          setDisplayMessages((prev) =>
-            prev.filter((msg) => msg.id !== optimisticMessage.id)
-          );
-          socket.off("message_sent", handleMessageSent);
-          socket.off("message_error", handleMessageError);
-        };
-
-        socket.once("message_sent", handleMessageSent);
-        socket.once("message_error", handleMessageError);
       });
-
     } else {
-      // Use API for regular chats
-      setInput(""); // Clear input immediately
-      sendMessage({ chatId, content: messageContent });
+      requestAnimationFrame(() => {
+        console.log("📤 [CLIENT] BACKGROUND: Sending agent message via API");
+        sendMessage({ chatId, content: messageContent });
+      });
     }
   };
 
@@ -323,9 +345,6 @@ export function ChatWindow({
                     className="max-w-full rounded-lg cursor-pointer hover:opacity-90 transition-opacity"
                     onClick={() => window.open(msg.content, "_blank")}
                   />
-                  {msg.content && msg.content !== msg.content && (
-                    <p className="text-sm">{msg.content}</p>
-                  )}
                 </div>
               ) : (
                 <p>{msg.content}</p>
@@ -337,7 +356,17 @@ export function ChatWindow({
                 )}
               >
                 {msg.timestamp ? format(new Date(msg.timestamp), "h:mm a") : ""}
-                {msg.fromMe && <CheckCheck className="h-3 w-3 text-blue-500" />}
+                {msg.fromMe && (
+                  <>
+                    {msg.isSaving ? (
+                      <div className="h-3 w-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                    ) : msg.isSaveFailed ? (
+                      <span className="text-red-500 font-bold">!</span>
+                    ) : (
+                      <CheckCheck className="h-3 w-3 text-blue-500" />
+                    )}
+                  </>
+                )}
               </div>
             </div>
 
@@ -387,7 +416,7 @@ export function ChatWindow({
 
           <Button
             type="submit"
-            disabled={!input.trim() || isSending}
+            disabled={!input.trim()}
             size="icon"
             className={cn(
               "h-11 w-11 rounded-full shrink-0 transition-all duration-300 shadow-md",
@@ -396,11 +425,7 @@ export function ChatWindow({
                 : "bg-muted text-muted-foreground hover:bg-muted",
             )}
           >
-            {isSending ? (
-              <div className="h-5 w-5 border-2 border-current border-t-transparent rounded-full animate-spin" />
-            ) : (
-              <Send className="h-5 w-5 ml-0.5" />
-            )}
+            <Send className="h-5 w-5 ml-0.5" />
           </Button>
         </form>
       </div>

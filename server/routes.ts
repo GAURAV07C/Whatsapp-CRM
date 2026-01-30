@@ -280,16 +280,52 @@ export async function registerRoutes(
       return res.status(503).json({ message: "WhatsApp client not available" });
     }
 
-    const message = await storage.createMessage({
+    // ⚡ Return response immediately with temporary message ID
+    // Let client know message was sent to WhatsApp
+    const tempMessageId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+    res.status(201).json({
+      id: tempMessageId,
       chatId,
       tenantId: chat.tenantId,
       content,
       type: "text",
       fromMe: true,
       senderName: "Agent",
+      timestamp: new Date().toISOString(),
+      isSaving: true,
     });
 
-    res.status(201).json(message);
+    // 🔄 BACKGROUND: Save to database asynchronously (don't wait)
+    storage
+      .createMessage({
+        chatId,
+        tenantId: chat.tenantId,
+        content,
+        type: "text",
+        fromMe: true,
+        senderName: "Agent",
+      })
+      .then((savedMessage) => {
+        console.log(
+          `💾 [BACKGROUND] Message saved to DB with ID: ${savedMessage.id}`,
+        );
+        io.to(`chat_${chatId}`).emit("message_saved", {
+          tempId: tempMessageId,
+          id: savedMessage.id,
+        });
+        io.to(`agent_${req.user!.agentId}`).emit("message_saved", {
+          tempId: tempMessageId,
+          id: savedMessage.id,
+        });
+      })
+      .catch((error) => {
+        console.error(`❌ [BACKGROUND] Failed to save message to DB:`, error);
+        io.to(`chat_${chatId}`).emit("message_save_error", {
+          tempId: tempMessageId,
+          error: "Failed to save message",
+        });
+      });
   });
 
   app.delete(api.chats.delete.path, auth, async (req, res) => {
@@ -620,16 +656,50 @@ export async function registerRoutes(
       return res.status(503).json({ message: "WhatsApp client not available" });
     }
 
-    const message = await storage.createMessage({
+    // ⚡ Return response immediately with temporary message ID (OPTIMISTIC)
+    const tempMessageId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+    res.status(201).json({
+      id: tempMessageId,
       chatId,
       tenantId: chat.tenantId,
       content,
       type: "text",
       fromMe: true,
       senderName: "Widget User",
+      timestamp: new Date().toISOString(),
+      isSaving: true,
     });
 
-    res.status(201).json(message);
+    // 🔄 BACKGROUND: Save to database asynchronously (don't wait)
+    storage
+      .createMessage({
+        chatId,
+        tenantId: chat.tenantId,
+        content,
+        type: "text",
+        fromMe: true,
+        senderName: "Widget User",
+      })
+      .then((savedMessage) => {
+        console.log(
+          `💾 [BACKGROUND] Widget REST API message saved to DB with ID: ${savedMessage.id}`,
+        );
+        io.to(`chat_${chatId}`).emit("message_saved", {
+          tempId: tempMessageId,
+          id: savedMessage.id,
+        });
+      })
+      .catch((error) => {
+        console.error(
+          `❌ [BACKGROUND] Failed to save widget REST message to DB:`,
+          error,
+        );
+        io.to(`chat_${chatId}`).emit("message_save_error", {
+          tempId: tempMessageId,
+          error: "Failed to save message",
+        });
+      });
   });
 
   // === TENANT API ===
