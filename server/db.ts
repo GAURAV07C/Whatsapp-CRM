@@ -9,7 +9,7 @@ import * as schema from "@shared/schema";
 
 async function initDB() {
   // MySQL connection using URL
-  const connectionUrl = process.env.DATABASE_URL!
+  const connectionUrl = process.env.MYSQL_URL!
 
 
   const connection = await mysql.createConnection(connectionUrl);
