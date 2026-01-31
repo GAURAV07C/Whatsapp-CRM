@@ -247,10 +247,12 @@ export class WhatsAppManager {
         const message = await storage.createMessage({
           chatId: dbChat.id,
           tenantId,
+          agentId,
           content: msg.body || "",
           type: msg.type,
           fromMe: msg.fromMe,
           senderName: contact?.name || contact?.pushname || "Customer",
+           timestamp: new Date(),
         });
 
         console.log(`   💾 Message saved with ID: ${message.id}`);

@@ -8,6 +8,7 @@ import { WhatsAppManager } from "./whatsapp";
 import { auth } from "./middleware/auth";
 // import { Chat } from "whatsapp-web.js";
 import { Chat, Message } from "@shared/schema";
+import { swaggerUiMiddleware, swaggerUiSetup } from "./swagger";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -188,7 +189,7 @@ export async function registerRoutes(
   });
 
   app.post(api.chats.create.path, auth, async (req, res) => {
-    const tenantId = req.user!.tenantId;
+    const tenantId = req.user!.tenantId ;
     const agentId = req.user!.agentId;
 
     const { remoteJid, customerName } = api.chats.create.input.parse(req.body);
@@ -1014,7 +1015,9 @@ export async function registerRoutes(
   });
 
   app.get(api.open.chats.get.path, async (req, res) => {
+     res.set("Cache-Control", "no-store");
     try {
+
       const tenantId = parseInt(
         Array.isArray(req.params.tenantId)
           ? req.params.tenantId[0]
@@ -1053,7 +1056,7 @@ export async function registerRoutes(
       const messages = await storage.getMessages(chatId);
 
       // Return only messages array (matches expected type)
-      res.status(200).json(messages);
+      res.status(200).json({...chat,messages});
     } catch (err) {
       console.error(err);
       res.status(500).json({ message: "Failed to fetch chats" });
@@ -1099,18 +1102,115 @@ export async function registerRoutes(
           .json({ message: "Chat not found for this agent/tenant" });
       }
 
-      // Create the message
-      const message = await storage.createMessage({
+      const client = await WhatsAppManager.getClient(req.user!.agentId);
+
+      if(client){
+        try{
+        const state = await client.getState();
+
+
+         if (state !== "CONNECTED") {
+          console.warn(`⚠️ WhatsApp client not connected. State: ${state}`);
+          return res
+            .status(503)
+            .json({ message: "WhatsApp client not connected" });
+        }
+
+         await new Promise((resolve) => setTimeout(resolve, 2000));
+
+          const whatsappChat = await client.getChatById(chat.remoteJid);
+
+           if (!whatsappChat) {
+          console.warn(`⚠️ Chat ${chat.remoteJid} not found in WhatsApp`);
+          return res
+            .status(404)
+            .json({ message: "Chat not found in WhatsApp" });
+        }
+
+          await client.sendMessage(chat.remoteJid, content, { sendSeen: false });
+        console.log(`✅ Message sent to ${chat.remoteJid}: ${content}`);
+
+      }  catch (error) {
+        console.error(`❌ Failed to send message to ${chat.remoteJid}:`, error);
+
+        // Check if it's a common whatsapp-web.js error
+        if (
+          error instanceof Error &&
+          error.message &&
+          error.message.includes("markedUnread")
+        ) {
+          console.warn(
+            `⚠️ WhatsApp Web session issue detected. Client may need re-authentication.`,
+          );
+          return res.status(503).json({
+            message: "WhatsApp session needs refresh. Please re-scan QR code.",
+            code: "SESSION_EXPIRED",
+          });
+        }
+
+        return res
+          .status(500)
+          .json({ message: "Failed to send message via WhatsApp" });
+      }
+
+
+      } else {
+      console.warn(
+        `⚠️ No WhatsApp client available for agent ${req.user!.agentId}`,
+      );
+      return res.status(503).json({ message: "WhatsApp client not available" });
+    }
+
+   const tempMessageId = `temp-${Date.now()}-${Math.random()
+      .toString(36)
+      .slice(2)}`;
+
+    res.status(201).json({
+      id: tempMessageId,
+      chatId,
+      tenantId,
+      content,
+      type: "text",
+      fromMe: true,
+      senderName: "Agent",
+      timestamp: new Date().toISOString(),
+      isSaving: true,
+    });
+
+    // 🔄 BACKGROUND DB SAVE
+    storage
+      .createMessage({
         chatId,
         tenantId,
         content,
-        fromMe: true, // assuming agent is sending
-        senderName: "Agent", // you can replace with actual agent name
-        type: "text", // can be dynamic if needed
-        timestamp: new Date(),
+        type: "text",
+        fromMe: true,
+        senderName: "Agent",
+      })
+      .then((saved) => {
+        io.to(`chat_${chatId}`).emit("message_saved", {
+          tempId: tempMessageId,
+          id: saved.id,
+        });
+
+        io.to(`agent_${agentId}`).emit("message_saved", {
+          tempId: tempMessageId,
+          id: saved.id,
+        });
+
+        console.log(`💾 Message saved with ID ${saved.id}`);
+      })
+      .catch((err) => {
+        console.error("❌ DB save failed:", err);
+
+        io.to(`chat_${chatId}`).emit("message_save_error", {
+          tempId: tempMessageId,
+          error: "Failed to save message",
+        });
       });
 
-      return res.status(201).json(message);
+
+    
     } catch (err) {
       console.error(err);
       return res.status(500).json({ message: "Failed to send message" });
@@ -1118,6 +1218,9 @@ export async function registerRoutes(
   });
 
   // ============================
+
+  // === SWAGGER UI ===
+  app.use("/docs", swaggerUiMiddleware, swaggerUiSetup);
 
   return httpServer;
 }
