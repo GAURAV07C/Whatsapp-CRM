@@ -1,4 +1,3 @@
-
 {
   "name": "rest-express",
   "version": "1.0.0",
@@ -77,10 +76,10 @@
     "socket.io-client": "^4.8.3",
     "tailwind-merge": "^2.6.0",
     "tailwindcss-animate": "^1.0.7",
+    "tsx": "^4.20.5",
     "tw-animate-css": "^1.2.5",
     "vaul": "^1.1.2",
-    "whatsapp-web.js": "^1.34.4",
-    "tsx": "^4.20.5",
+    "whatsapp-web.js": "github:timothydillan/whatsapp-web.js#fix/duplicate-events-and-bindings",
     "wouter": "^3.3.5",
     "ws": "^8.18.0",
     "zod": "^3.24.2",

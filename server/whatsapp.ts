@@ -53,6 +53,7 @@ export class WhatsAppManager {
         clientId: `agent-${agentId}`,
       }),
       puppeteer: {
+        
         headless: true,
         args: ["--no-sandbox", "--disable-setuid-sandbox"],
       },
@@ -145,6 +146,10 @@ export class WhatsAppManager {
      */
     console.log(`🎧 [AGENT ${agentId}] Setting up message event listener`);
     client.on("message", async (msg) => {
+      // Log incoming messages from client
+      if (!msg.fromMe) {
+        console.log(`📨 [CLIENT MESSAGE] From: ${msg.from}, Body: "${msg.body}"`);
+      }
       // <<<<<<< HEAD
       console.log("💕❤🎁");
       // =======
