@@ -6,8 +6,11 @@ import {
   int,
   boolean,
   timestamp,
+  foreignKey,
+  uniqueIndex,
   json,
   varchar,
+  index,
 } from "drizzle-orm/mysql-core";
 import { relations } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
@@ -64,19 +67,40 @@ export const sessions = mysqlTable("sessions", {
 });
 
 // Chats
-export const chats = mysqlTable("chats", {
-  id: int("id").autoincrement().primaryKey(),
-  tenantId: int("tenant_id")
-    .references(() => tenants.id)
-    .notNull(),
-  remoteJid: text("remote_jid").notNull(), // WhatsApp ID (phone@c.us)
-  customerName: text("customer_name"),
-  status: text("status").default("open"),
-  assignedAgentId: int("assigned_agent_id").references(() => agents.id),
-  unreadCount: int("unread_count").default(0),
-  lastMessageAt: timestamp("last_message_at").defaultNow(),
-  createdAt: timestamp("created_at").defaultNow(),
-});
+export const chats = mysqlTable(
+  "chats",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    tenantId: int("tenant_id")
+      .references(() => tenants.id)
+      .notNull(),
+    remoteJid: text("remote_jid").notNull(), // WhatsApp ID (phone@c.us)
+    customerName: text("customer_name"),
+    status: text("status").default("open"),
+    assignedAgentId: int("assigned_agent_id").notNull(),
+    unreadCount: int("unread_count").default(0),
+    lastMessageAt: timestamp("last_message_at").defaultNow(),
+    createdAt: timestamp("created_at").defaultNow(),
+  },
+
+  (table) => ({
+    uniq_agent_customer: uniqueIndex("uniq_agent_customer").on(
+      table.tenantId,
+      table.assignedAgentId,
+      table.remoteJid,
+    ),
+
+    fk_agent_tenant: foreignKey({
+      columns: [table.assignedAgentId, table.tenantId],
+      foreignColumns: [agents.id, agents.tenantId],
+    }),
+
+    idx_agent_chat_list: index("idx_agent_chat_list").on(
+      table.assignedAgentId,
+      table.lastMessageAt,
+    ),
+  }),
+);
 
 // Messages
 export const messages = mysqlTable("messages", {

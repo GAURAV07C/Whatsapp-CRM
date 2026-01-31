@@ -34,10 +34,11 @@ export interface IStorage {
   createAgent(agent: CreateAgentRequest): Promise<Agent>;
 
   // Chats
-  getChats(tenantId: number): Promise<Chat[]>;
+  getChats(tenantId: number, assignedAgentId?: number): Promise<Chat[]>;
   getChat(id: number): Promise<Chat | undefined>;
   getChatByRemoteJid(
     tenantId: number,
+    assignedAgentId: number,
     remoteJid: string,
   ): Promise<Chat | undefined>;
   createChat(chat: any): Promise<Chat>;
@@ -156,11 +157,19 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Chats
-  async getChats(tenantId: number): Promise<Chat[]> {
+  async getChats(tenantId: number, assignedAgentId?: number): Promise<Chat[]> {
+    const conditions = [eq(chats.tenantId, tenantId)];
+    if (assignedAgentId) {
+      conditions.push(eq(chats.assignedAgentId, assignedAgentId));
+    }
+
+    const whereClause =
+      conditions.length === 1 ? conditions[0] : and(...conditions);
+
     return await db
       .select()
       .from(chats)
-      .where(eq(chats.tenantId, tenantId))
+      .where(whereClause)
       .orderBy(desc(chats.lastMessageAt));
   }
 
@@ -169,18 +178,65 @@ export class DatabaseStorage implements IStorage {
     return chat;
   }
 
+  // storage.ts (DatabaseStorage class ke andar)
+  async getAgentChats(
+    tenantId: number,
+    assignedAgentId: number,
+  ): Promise<Chat[]> {
+    return await db
+      .select({
+        id: chats.id,
+        tenantId: chats.tenantId,
+        remoteJid: chats.remoteJid,
+        customerName: chats.customerName,
+        status: chats.status,
+        assignedAgentId: chats.assignedAgentId,
+        unreadCount: chats.unreadCount,
+        lastMessageAt: chats.lastMessageAt,
+        createdAt: chats.createdAt,
+      })
+      .from(chats)
+      .where(
+        and(
+          eq(chats.tenantId, tenantId),
+          eq(chats.assignedAgentId, assignedAgentId),
+        ),
+      )
+      .orderBy(desc(chats.lastMessageAt));
+  }
+
   async getChatByRemoteJid(
     tenantId: number,
+    assignedAgentId: number,
     remoteJid: string,
   ): Promise<Chat | undefined> {
     const [chat] = await db
       .select()
       .from(chats)
-      .where(and(eq(chats.tenantId, tenantId), eq(chats.remoteJid, remoteJid)));
+      .where(
+        and(
+          eq(chats.tenantId, tenantId),
+          eq(chats.assignedAgentId, assignedAgentId),
+          eq(chats.remoteJid, remoteJid),
+        ),
+      );
     return chat;
   }
 
-  async createChat(chat: any): Promise<Chat> {
+  async createChat(chat: {
+    tenantId: number;
+    assignedAgentId: number;
+    remoteJid: string;
+    customerName?: string;
+  }): Promise<Chat> {
+    // check if chat already exists for this agent
+    const existing = await this.getChatByRemoteJid(
+      chat.tenantId,
+      chat.assignedAgentId,
+      chat.remoteJid,
+    );
+    if (existing) return existing;
+
     const result = await db.insert(chats).values(chat).$returningId();
     const newChat = await this.getChat(result[0].id);
     return newChat!;
@@ -207,6 +263,8 @@ export class DatabaseStorage implements IStorage {
       .where(eq(messages.chatId, chatId))
       .orderBy(messages.timestamp);
   }
+
+  
 
   async createMessage(message: any): Promise<Message> {
     const result = await db.insert(messages).values(message).$returningId();

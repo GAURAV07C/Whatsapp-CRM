@@ -11,6 +11,7 @@ import {
   type MeResponse,
 } from "./schema";
 import type { AgentLoginRequest, AgentLoginResponse } from "./schema";
+import { response } from "express";
 
 export type { AgentLoginRequest, AgentLoginResponse, MeResponse };
 
@@ -116,27 +117,92 @@ export const api = {
     },
 
     whatsapp: {
-    status: {
-      method: "GET" as const,
-      path: "/api/open/whatsapp/status/:tenantId/:agentId",
-      responses: {
-        200: z.object({
-          status: z.enum(["disconnected", "connected", "qr_ready"]),
-          qr: z.string().optional(), // Base64 QR code
-        }),
+      status: {
+        method: "GET" as const,
+        path: "/api/open/whatsapp/status/:tenantId/:agentId",
+        responses: {
+          200: z.object({
+            status: z.enum(["disconnected", "connected", "qr_ready"]),
+            qr: z.string().optional(), // Base64 QR code
+          }),
+        },
+      },
+      logout: {
+        method: "POST" as const,
+        path: "/api/open/whatsapp/logout",
+        responses: {
+          200: z.object({ success: z.boolean() }),
+        },
       },
     },
-    logout: {
-      method: "POST" as const,
-      path: "/api/open/whatsapp/logout",
-      responses: {
-        200: z.object({ success: z.boolean() }),
+
+    chats: {
+      list: {
+        method: "GET" as const,
+        path: "/api/open/chats/:tenantId",
+        responses: {
+          200: z.array(z.custom<typeof chats.$inferSelect>()),
+        },
+      },
+      create: {
+        method: "POST" as const,
+        path: "/api/open/chats/:tenantId/:agentId",
+        input: z.object({
+          remoteJid: z.string(),
+          customerName: z.string().optional(),
+        }),
+        responses: {
+          201: z.custom<typeof chats.$inferSelect>(),
+        },
+      },
+      get: {
+        method: "GET" as const,
+        path: "/api/open/chats/:tenantId/:agentId",
+        responses: {
+          200: z.custom<
+            typeof chats.$inferSelect & {
+              messages: (typeof chats.$inferSelect)[];
+            }
+          >(),
+          404: errorSchemas.notFound,
+        },
+      },
+
+      getMessage: {
+        method: "GET" as const,
+        path: "/api/open/chat/:tenantId/:agentId/:chatId",
+
+        response: {
+          200: z.custom<
+            typeof chats.$inferSelect & {
+              messages: (typeof messages.$inferSelect)[];
+            }
+          >(),
+          404: errorSchemas.notFound,
+        },
+      },
+
+      sendMessage: {
+        method: "POST" as const,
+        path: "/api/chats/:tenantId/:agentId/:id/messages",
+        input: z.object({
+          content: z.string(),
+        }),
+        responses: {
+          201: z.custom<typeof messages.$inferSelect>(),
+        },
+      },
+      delete: {
+        method: "DELETE" as const,
+        path: "/api/chats/:id",
+        responses: {
+          200: z.object({ success: z.boolean() }),
+          404: errorSchemas.notFound,
+        },
       },
     },
   },
 
-  
-  },
   whatsapp: {
     status: {
       method: "GET" as const,

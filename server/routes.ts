@@ -6,6 +6,8 @@ import { z } from "zod";
 import { setupSocket, setIo } from "./socket";
 import { WhatsAppManager } from "./whatsapp";
 import { auth } from "./middleware/auth";
+// import { Chat } from "whatsapp-web.js";
+import { Chat, Message } from "@shared/schema";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -187,12 +189,16 @@ export async function registerRoutes(
 
   app.post(api.chats.create.path, auth, async (req, res) => {
     const tenantId = req.user!.tenantId;
+    const agentId = req.user!.agentId;
+
     const { remoteJid, customerName } = api.chats.create.input.parse(req.body);
 
     const chat = await storage.createChat({
       tenantId,
+
       remoteJid,
       customerName,
+      assignedAgentId: 0,
     });
 
     res.status(201).json(chat);
@@ -882,7 +888,7 @@ export async function registerRoutes(
     }
   });
 
-  // get whatsapp status by agent id
+  // get whatsapp status and qr  by agent id
 
   app.get(api.open.whatsapp.status.path, async (req, res) => {
     try {
@@ -936,6 +942,178 @@ export async function registerRoutes(
       });
     } catch (err) {
       res.status(400).json({ message: "Invalid input" });
+    }
+  });
+
+  // get chat by tend id
+  app.get(api.open.chats.list.path, async (req, res) => {
+    try {
+      const tenantId = parseInt(
+        Array.isArray(req.params.tenantId)
+          ? req.params.tenantId[0]
+          : req.params.tenantId,
+      );
+      if (!tenantId) {
+        return res.status(400).json({ message: "Missing tenantId" });
+      }
+      const chats = await storage.getChats(tenantId);
+      const grouped: Record<number, { agentId: number; chats: Chat[] }> = {};
+
+      chats.forEach((chat) => {
+        const agentId = chat.assignedAgentId;
+        if (!grouped[agentId]) {
+          grouped[agentId] = { agentId, chats: [] };
+        }
+        grouped[agentId].chats.push(chat);
+      });
+
+      // Convert to array
+      const result = Object.values(grouped);
+
+      res.json(result);
+    } catch (err) {
+      res.status(400).json({ message: "Invalid input" });
+    }
+  });
+
+  // create chat by tend/agent
+
+  app.post(api.open.chats.create.path, async (req, res) => {
+    try {
+      const tenantId = parseInt(
+        Array.isArray(req.params.tenantId)
+          ? req.params.tenantId[0]
+          : req.params.tenantId,
+      );
+      if (!tenantId) {
+        return res.status(400).json({ message: "Missing tenantId" });
+      }
+
+      const agentId = parseInt(
+        Array.isArray(req.params.agentId)
+          ? req.params.agentId[0]
+          : req.params.agentId,
+      );
+      console.log("agentId", agentId);
+      const { remoteJid, customerName } = req.body;
+
+      if (!remoteJid || !customerName) {
+        return res.status(400).json({
+          message: "Missing required fields: remoteJid and customerName",
+        });
+      }
+      const chat = await storage.createChat({
+        tenantId,
+        assignedAgentId: agentId,
+        remoteJid,
+        customerName,
+      });
+
+      res.status(201).json(chat);
+    } catch (err) {}
+  });
+
+  app.get(api.open.chats.get.path, async (req, res) => {
+    try {
+      const tenantId = parseInt(
+        Array.isArray(req.params.tenantId)
+          ? req.params.tenantId[0]
+          : req.params.tenantId,
+      );
+      const agentId = parseInt(
+        Array.isArray(req.params.agentId)
+          ? req.params.agentId[0]
+          : req.params.agentId,
+      );
+
+      const chatId = parseInt(
+        Array.isArray(req.params.chatId)
+          ? req.params.chatId[0]
+          : req.params.chatId,
+      );
+
+      if (!tenantId || !agentId || !chatId) {
+        return res
+          .status(400)
+          .json({ message: "Missing tenantId or agentId or chatId" });
+      }
+
+      // Optional: verify chat belongs to tenant & agent
+      const chat = await storage.getChat(chatId);
+      if (
+        !chat ||
+        chat.tenantId !== tenantId ||
+        chat.assignedAgentId !== agentId
+      ) {
+        return res
+          .status(404)
+          .json({ message: "Chat not found for this agent/tenant" });
+      }
+
+      const messages = await storage.getMessages(chatId);
+
+      // Return only messages array (matches expected type)
+      res.status(200).json(messages);
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ message: "Failed to fetch chats" });
+    }
+  });
+
+  app.post(api.open.chats.sendMessage.path, async (req, res) => {
+    try {
+      const tenantId = parseInt(
+        Array.isArray(req.params.tenantId)
+          ? req.params.tenantId[0]
+          : req.params.tenantId,
+      );
+      const agentId = parseInt(
+        Array.isArray(req.params.agentId)
+          ? req.params.agentId[0]
+          : req.params.agentId,
+      );
+      const chatId = parseInt(
+        Array.isArray(req.params.id) ? req.params.id[0] : req.params.id,
+      );
+      const { content } = req.body;
+
+      if (!tenantId || !agentId || !chatId) {
+        return res
+          .status(400)
+          .json({ message: "Missing tenantId, agentId, or chatId" });
+      }
+
+      if (!content || content.trim() === "") {
+        return res.status(400).json({ message: "Message content is required" });
+      }
+
+      // Fetch the chat to make sure it belongs to this tenant & agent
+      const chat = await storage.getChat(chatId);
+      if (
+        !chat ||
+        chat.tenantId !== tenantId ||
+        chat.assignedAgentId !== agentId
+      ) {
+        return res
+          .status(404)
+          .json({ message: "Chat not found for this agent/tenant" });
+      }
+
+      // Create the message
+      const message = await storage.createMessage({
+        chatId,
+        tenantId,
+        content,
+        fromMe: true, // assuming agent is sending
+        senderName: "Agent", // you can replace with actual agent name
+        type: "text", // can be dynamic if needed
+        timestamp: new Date(),
+      });
+
+      return res.status(201).json(message);
+    } catch (err) {
+      console.error(err);
+      return res.status(500).json({ message: "Failed to send message" });
     }
   });
 
