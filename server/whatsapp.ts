@@ -53,7 +53,6 @@ export class WhatsAppManager {
         clientId: `agent-${agentId}`,
       }),
       puppeteer: {
-        
         headless: true,
         args: ["--no-sandbox", "--disable-setuid-sandbox"],
       },
@@ -70,7 +69,9 @@ export class WhatsAppManager {
       }
       const tenantId = agent.tenantId;
 
-      console.log(`📸 QR Code received for tenant ${tenantId}, agent ${agentId}`);
+      console.log(
+        `📸 QR Code received for tenant ${tenantId}, agent ${agentId}`,
+      );
       try {
         // Generate initial QR PNG Base64
         const qrDataUrl = await QRCode.toDataURL(qr);
@@ -148,7 +149,9 @@ export class WhatsAppManager {
     client.on("message", async (msg) => {
       // Log incoming messages from client
       if (!msg.fromMe) {
-        console.log(`📨 [CLIENT MESSAGE] From: ${msg.from}, Body: "${msg.body}"`);
+        console.log(
+          `📨 [CLIENT MESSAGE] From: ${msg.from}, Body: "${msg.body}"`,
+        );
       }
       // <<<<<<< HEAD
       console.log("💕❤🎁");
@@ -201,7 +204,11 @@ export class WhatsAppManager {
 
         // 🔍 CRITICAL: Look up chat by BOTH tenantId and chatId (phone number)
         // This ensures messages from one number don't affect chats from another number
-        let dbChat = await storage.getChatByRemoteJid(tenantId, chatId);
+        let dbChat = await storage.getChatByRemoteJid(
+          tenantId,
+          agentId,
+          chatId,
+        );
         console.log(
           `   Chat lookup: tenantId=${tenantId}, remoteJid=${chatId} -> ${!!dbChat ? `Found existing chat (ID: ${dbChat.id})` : "Creating new chat"}`,
         );
@@ -211,8 +218,7 @@ export class WhatsAppManager {
             tenantId,
             remoteJid: chatId,
             customerName: contact?.name || contact?.pushname || "Customer",
-            status: "open",
-            unreadCount: 1,
+            assignedAgentId: agent.id,
           });
           console.log(`   ✅ Created new chat ID: ${dbChat.id}`);
         } else {

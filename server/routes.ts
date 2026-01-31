@@ -198,7 +198,7 @@ export async function registerRoutes(
 
       remoteJid,
       customerName,
-      assignedAgentId: 0,
+      assignedAgentId: agentId,
     });
 
     res.status(201).json(chat);
