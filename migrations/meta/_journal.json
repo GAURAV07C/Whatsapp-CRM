@@ -15,6 +15,13 @@
       "when": 1769690162773,
       "tag": "0001_eager_pride",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1769846399835,
+      "tag": "0002_little_purifiers",
+      "breakpoints": true
     }
   ]
 }

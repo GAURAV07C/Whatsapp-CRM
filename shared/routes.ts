@@ -65,7 +65,78 @@ export const api = {
     },
   },
 
-  // === WHATSAPP MANAGEMENT (Tenant Admin) ===
+  open: {
+    tenants: {
+      createTenant: {
+        method: "POST" as const,
+        path: "/api/open/tenants",
+        input: z.object({
+          username: z.string(),
+          url: z.string(),
+        }),
+        responses: {
+          201: z.object({
+            tenant: z.custom<typeof tenants.$inferSelect>(),
+          }),
+        },
+      },
+    },
+
+    agents: {
+      createAgent: {
+        method: "POST" as const,
+        path: "/api/open/agents",
+        input: z.object({
+          tenantId: z.number(),
+          username: z.string(),
+        }),
+      },
+      getAgentsByTenantId: {
+        method: "GET" as const,
+        path: "/api/open/agents/tenant/:tenantId",
+        responses: {
+          200: z.array(z.custom<typeof agents.$inferSelect>()),
+        },
+      },
+      getAgentByAgentId: {
+        method: "GET" as const,
+        path: "/api/open/tend/agent/:tenantId/:agentId",
+        responses: {
+          200: z.custom<typeof agents.$inferSelect>(),
+        },
+      },
+
+      getAgentById: {
+        method: "GET" as const,
+        path: "/api/open/agents/:agentId",
+        responses: {
+          200: z.custom<typeof agents.$inferSelect>(),
+        },
+      },
+    },
+
+    whatsapp: {
+    status: {
+      method: "GET" as const,
+      path: "/api/open/whatsapp/status/:tenantId/:agentId",
+      responses: {
+        200: z.object({
+          status: z.enum(["disconnected", "connected", "qr_ready"]),
+          qr: z.string().optional(), // Base64 QR code
+        }),
+      },
+    },
+    logout: {
+      method: "POST" as const,
+      path: "/api/open/whatsapp/logout",
+      responses: {
+        200: z.object({ success: z.boolean() }),
+      },
+    },
+  },
+
+  
+  },
   whatsapp: {
     status: {
       method: "GET" as const,

@@ -70,7 +70,7 @@ export class WhatsAppManager {
       }
       const tenantId = agent.tenantId;
 
-      console.log(`📸 QR Code received for tenant ${tenantId}`);
+      console.log(`📸 QR Code received for tenant ${tenantId}, agent ${agentId}`);
       try {
         // Generate initial QR PNG Base64
         const qrDataUrl = await QRCode.toDataURL(qr);

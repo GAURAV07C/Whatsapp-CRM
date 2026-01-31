@@ -754,5 +754,192 @@ export async function registerRoutes(
     });
   });
 
+  // ================open for all=================
+
+  // tested  by postman
+  app.post(api.open.tenants.createTenant.path, async (req, res) => {
+    try {
+      const { username, url } = req.body;
+
+      const existing = await storage.getAgentByUsername(username);
+      if (existing) {
+        return res.status(400).json({ message: "Username already exists" });
+      }
+
+      const tenant = await storage.createTenant({
+        name: url,
+        publicKey: `pk_${Math.random().toString(36).substring(2, 11)}`,
+        config: {
+          themeColor: "#25D366",
+          greetingMessage: "Hi there! How can we help?",
+          agentName: username,
+        },
+        allowedDomains: ["*"],
+      });
+      res.status(201).json({ tenant });
+    } catch (err) {
+      res.status(400).json({ message: "Invalid input" });
+    }
+  });
+
+  // tested by postman
+  app.post(api.open.agents.createAgent.path, async (req, res) => {
+    try {
+      const { tenantId, username } = req.body;
+
+      if (!tenantId || !username) {
+        return res
+          .status(400)
+          .json({ message: "Missing tenantId or username" });
+      }
+
+      const existing = await storage.getAgentByUsername(username);
+
+      if (existing) {
+        return res.status(400).json({ message: "Username already exists" });
+      }
+
+      const agent = await storage.createAgent({
+        tenantId: tenantId,
+        username,
+        password: "password", // In real app, hash this!
+      });
+
+      res.status(201).json({ agent });
+    } catch (err) {
+      res.status(400).json({ message: "Invalid input" });
+    }
+  });
+
+  // === GET AGENTs BY TENANT ID ===
+  app.get(api.open.agents.getAgentsByTenantId.path, async (req, res) => {
+    try {
+      const tenantId = parseInt(
+        Array.isArray(req.params.tenantId)
+          ? req.params.tenantId[0]
+          : req.params.tenantId,
+      );
+
+      if (!tenantId) {
+        return res.status(400).json({ message: "Missing tenantId" });
+      }
+      const agents = await storage.getAgentsByTenantId(tenantId);
+
+      res.json({ agents });
+    } catch (err) {
+      res.status(400).json({ message: "Invalid input" });
+    }
+  });
+
+  // === GET AGENT BY Tend ID ===
+
+  app.get(api.open.agents.getAgentByAgentId.path, async (req, res) => {
+    try {
+      const tenantId = parseInt(
+        Array.isArray(req.params.tenantId)
+          ? req.params.tenantId[0]
+          : req.params.tenantId,
+      );
+      const agentId = parseInt(
+        Array.isArray(req.params.agentId)
+          ? req.params.agentId[0]
+          : req.params.agentId,
+      );
+      if (!tenantId || !agentId) {
+        return res.status(400).json({ message: "Missing tenantId or agentId" });
+      }
+      const agent = await storage.getAgent(agentId);
+
+      if (!agent) {
+        return res.status(404).json({ message: "Agent not found" });
+      }
+
+      if (agent.tenantId !== tenantId) {
+        return res
+          .status(404)
+          .json({ message: "Agent not found for this tenant" });
+      }
+      res.json({ agent });
+    } catch (err) {
+      res.status(400).json({ message: "Invalid input" });
+    }
+  });
+
+  app.get(api.open.agents.getAgentById.path, async (req, res) => {
+    try {
+      const agentId = parseInt(
+        Array.isArray(req.params.agentId)
+          ? req.params.agentId[0]
+          : req.params.agentId,
+      );
+      if (!agentId) {
+        return res.status(400).json({ message: "Missing agentId" });
+      }
+      const agent = await storage.getAgent(agentId);
+      res.json({ agent });
+    } catch (err) {
+      res.status(400).json({ message: "Invalid input" });
+    }
+  });
+
+  // get whatsapp status by agent id
+
+  app.get(api.open.whatsapp.status.path, async (req, res) => {
+    try {
+      const tenantId = parseInt(
+        Array.isArray(req.params.tenantId)
+          ? req.params.tenantId[0]
+          : req.params.tenantId,
+      );
+      console.log("tenantId", tenantId);
+      const agentId = parseInt(
+        Array.isArray(req.params.agentId)
+          ? req.params.agentId[0]
+          : req.params.agentId,
+      );
+      console.log("agentId", agentId);
+
+      if (!agentId || !tenantId) {
+        return res.status(400).json({ message: "Missing agentId or tenantId" });
+      }
+
+      const ValidateTendId = await storage.getTenant(tenantId);
+
+      if (!ValidateTendId) {
+        return res.status(400).json({ message: "Invalid tenantId" });
+      }
+
+      const ValidateAgentId = await storage.getAgent(agentId);
+
+      if (!ValidateAgentId) {
+        return res.status(400).json({ message: "Invalid agentId" });
+      }
+
+      const clientStatus = WhatsAppManager.getStatus(agentId);
+      console.log(
+        `📊 Client status for tend ${tenantId}  agent ${agentId}: ${clientStatus}`,
+      );
+
+      let qr = undefined;
+      if (ValidateAgentId.whatsappStatus !== "connected") {
+        console.log(`📸 Getting QR code for agent ${agentId}`);
+        const qrCode = await WhatsAppManager.getQrCode(agentId);
+        console.log(`📸 QR result: ${qrCode ? "Got QR" : "No QR needed"}`);
+        if (qrCode && qrCode !== "initializing") {
+          qr = qrCode;
+        }
+      }
+
+      res.json({
+        status: clientStatus,
+        qr,
+      });
+    } catch (err) {
+      res.status(400).json({ message: "Invalid input" });
+    }
+  });
+
+  // ============================
+
   return httpServer;
 }

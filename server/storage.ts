@@ -68,8 +68,10 @@ export class DatabaseStorage implements IStorage {
     const result = await db
       .insert(tenants)
       .values({
-        ...tenant,
+        name: tenant.name,
+        publicKey: tenant.publicKey,
         config: tenant.config as any,
+        allowedDomains: (tenant.allowedDomains || []) as string[],
       })
       .$returningId();
     const newTenant = await this.getTenant(result[0].id);
@@ -148,6 +150,7 @@ export class DatabaseStorage implements IStorage {
 
   async createAgent(agent: CreateAgentRequest): Promise<Agent> {
     const result = await db.insert(agents).values(agent).$returningId();
+    console.log("Created agent with ID:", result[0].id);
     const newAgent = await this.getAgent(result[0].id);
     return newAgent!;
   }
@@ -229,6 +232,10 @@ export class DatabaseStorage implements IStorage {
 
     return newMessage!;
   }
+
+  // =================open for all================
+
+  // =======================================================
 }
 
 export const storage = new DatabaseStorage();

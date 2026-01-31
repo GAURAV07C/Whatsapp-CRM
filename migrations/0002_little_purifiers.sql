@@ -1,0 +1,1 @@
+ALTER TABLE `agents` ADD `whatsapp_status` text DEFAULT ('disconnected');

@@ -49,13 +49,16 @@ export const agents = mysqlTable("agents", {
   password: text("password").notNull(), // Hashed
   role: text("role").default("agent"),
   isOnline: boolean("is_online").default(false),
+  whatsappStatus: text("whatsapp_status").default("disconnected"), // disconnected, connected, qr_ready
   createdAt: timestamp("created_at").defaultNow(),
 });
 
 // WhatsApp Sessions
 export const sessions = mysqlTable("sessions", {
   id: varchar("id", { length: 255 }).primaryKey(), // Usually "agent-{id}"
-  agentId: int("agent_id").references(() => agents.id).notNull(),
+  agentId: int("agent_id")
+    .references(() => agents.id)
+    .notNull(),
   data: json("data").notNull(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -73,7 +76,6 @@ export const chats = mysqlTable("chats", {
   unreadCount: int("unread_count").default(0),
   lastMessageAt: timestamp("last_message_at").defaultNow(),
   createdAt: timestamp("created_at").defaultNow(),
-  
 });
 
 // Messages
@@ -144,6 +146,7 @@ export const insertAgentSchema = createInsertSchema(agents).omit({
   id: true,
   createdAt: true,
   isOnline: true,
+  whatsappStatus: true,
 });
 
 export const insertChatSchema = createInsertSchema(chats).omit({
