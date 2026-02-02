@@ -17,6 +17,8 @@ export async function auth(req: Request, res: Response, next: NextFunction) {
     token = authHeader;
   }
 
+  console.log("token" , token)
+
   if (!token || token === "null") {
     return res.status(401).json({ message: "No token provided" });
   }

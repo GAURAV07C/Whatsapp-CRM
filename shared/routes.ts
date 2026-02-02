@@ -101,7 +101,7 @@ export const api = {
       },
       getAgentByAgentId: {
         method: "GET" as const,
-        path: "/api/open/tend/agent/:tenantId/:agentId",
+        path: "/api/open/agents/agent/:tenantId/:agentId",
         responses: {
           200: z.custom<typeof agents.$inferSelect>(),
         },
@@ -140,6 +140,11 @@ export const api = {
   list: {
     method: "GET",
     path: "/api/open/chats/:tenantId",
+  },
+
+  listByAgent: {
+    method: "GET",
+    path: "/api/open/chats/:tenantId/:agentId",
   },
 
   create: {
@@ -227,6 +232,16 @@ export const api = {
     sendMessage: {
       method: "POST" as const,
       path: "/api/chats/:id/messages",
+      input: z.object({
+        content: z.string(),
+      }),
+      responses: {
+        201: z.custom<typeof messages.$inferSelect>(),
+      },
+    },
+      sendMessage2: {
+      method: "POST" as const,
+      path: "/api/chats/:agentId/:id/messages",
       input: z.object({
         content: z.string(),
       }),

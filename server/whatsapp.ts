@@ -53,7 +53,7 @@ export class WhatsAppManager {
         clientId: `agent-${agentId}`,
       }),
       puppeteer: {
-        headless: true,
+        headless: false,
         args: ["--no-sandbox", "--disable-setuid-sandbox"],
       },
     });
@@ -168,6 +168,12 @@ export class WhatsAppManager {
         hasMedia: msg.hasMedia,
       });
 
+      // Skip processing interactive messages to avoid media download errors
+      if ((msg.type as string) === "interactive") {
+        console.log(`   ⏭️ Skipping interactive message`);
+        return;
+      }
+
       try {
         const contact = await msg.getContact();
         const chat = await msg.getChat();
@@ -229,7 +235,7 @@ export class WhatsAppManager {
 
         // Handle media if present
         let media = null;
-        if (msg.hasMedia) {
+        if (msg.hasMedia && msg.type !== "interactive") {
           try {
             const m = await msg.downloadMedia();
             if (m?.data) {

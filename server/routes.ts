@@ -6,10 +6,11 @@ import { z } from "zod";
 import { setupSocket, setIo } from "./socket";
 import { WhatsAppManager } from "./whatsapp";
 import { auth } from "./middleware/auth";
+import pkg from "whatsapp-web.js";
+const { Client } = pkg;
 // import { Chat } from "whatsapp-web.js";
 import { Chat, Message } from "@shared/schema";
 import { swaggerUiMiddleware, swaggerUiSetup } from "./swagger";
-import { table } from "console";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -230,12 +231,31 @@ export async function registerRoutes(
     );
 
     const chat = await storage.getChat(chatId);
+    console.log("chat",chat?.id, "chat Id",chatId)
     if (!chat) return res.status(404).json({ message: "Chat not found" });
 
     // Send via WhatsApp Client using agent ID
-    const client = await WhatsAppManager.getClient(req.user!.agentId);
+    let client = await WhatsAppManager.getClient(req.user!.agentId);
     if (client) {
       try {
+        // 🛡️ Detect dead puppeteer context early
+        try {
+          await client.getState();
+        } catch {
+          console.warn("⚠️ Dead client context detected, recreating...");
+          await WhatsAppManager.logout(req.user!.agentId).catch(() => {});
+          await new Promise(r => setTimeout(r, 1500));
+          client = await WhatsAppManager.getClient(req.user!.agentId);
+        }
+
+        if (!client) {
+          return res.status(503).json({ message: "Failed to recover WhatsApp client" });
+        }
+
+        if (!chat) {
+          return res.status(404).json({ message: "Chat not found" });
+        }
+
         // Check if client is ready
         const state = await client.getState();
         if (state !== "CONNECTED") {
@@ -257,8 +277,48 @@ export async function registerRoutes(
             .json({ message: "Chat not found in WhatsApp" });
         }
 
-        await client.sendMessage(chat.remoteJid, content, { sendSeen: false });
-        console.log(`✅ Message sent to ${chat.remoteJid}: ${content}`);
+          // Normalize remoteJid to ensure WhatsApp identifier format
+          let targetJid = chat.remoteJid;
+          if (!targetJid.includes("@")) {
+            const digits = String(targetJid).replace(/\D/g, "");
+            targetJid = `${digits}@c.us`;
+          }
+
+          // Helper: attempt send with recovery on puppeteer evaluation errors
+          const agentIdNumber = req.user!.agentId;
+        try {
+          await client.sendMessage(targetJid, content, { sendSeen: false });
+          console.log(`✅ Message sent to ${targetJid}: ${content}`);
+        } catch (sendErr) {
+          const fullStr =
+            sendErr instanceof Error
+              ? `${sendErr.message || ""}\n${sendErr.stack || ""}`
+              : String(sendErr);
+          const isPuppeteerEval = /ExecutionContext|Execution context|evaluate|t: t|ExecutionContext was destroyed|Cannot find context/i.test(fullStr);
+          const isSessionError = /session|auth|qr|disconnected|not connected/i.test(fullStr);
+          console.warn(`⚠️ sendMessage failed for ${targetJid}:`, fullStr, `- puppeteerEval:${isPuppeteerEval}, sessionError:${isSessionError}`);
+
+          if (isPuppeteerEval || isSessionError) {
+            console.warn(`🔁 Attempting client recovery for agent ${agentIdNumber}`);
+            try {
+              await WhatsAppManager.logout(agentIdNumber).catch(() => {});
+            } catch (e) {}
+            // Wait briefly for resources to be cleaned up
+            await new Promise((r) => setTimeout(r, 1500));
+            const newClient = await WhatsAppManager.getClient(agentIdNumber);
+            if (!newClient) throw sendErr;
+            // Give the new client a moment to stabilize
+            await new Promise((r) => setTimeout(r, 2000));
+            await newClient.sendMessage(targetJid, content, { sendSeen: false });
+            console.log(`✅ Message sent after recovery to ${targetJid}: ${content}`);
+          } else {
+            // Non-puppeteer/session error - single retry
+            console.warn(`⚠️ Non-critical error, retrying once for ${targetJid}`);
+            await new Promise((r) => setTimeout(r, 1000));
+            await client.sendMessage(targetJid, content, { sendSeen: false });
+            console.log(`✅ Message sent on retry to ${targetJid}: ${content}`);
+          }
+        }
       } catch (error) {
         console.error(`❌ Failed to send message to ${chat.remoteJid}:`, error);
 
@@ -638,8 +698,42 @@ export async function registerRoutes(
             .json({ message: "Chat not found in WhatsApp" });
         }
 
-        await client.sendMessage(chat.remoteJid, content, { sendSeen: false });
-        console.log(`✅ Message sent to ${chat.remoteJid}: ${content}`);
+        // Normalize remoteJid and retry once on transient puppeteer errors
+        let targetJid = chat.remoteJid;
+        if (!targetJid.includes("@")) {
+          const digits = String(targetJid).replace(/\D/g, "");
+          targetJid = `${digits}@c.us`;
+        }
+
+        try {
+          await client.sendMessage(targetJid, content, { sendSeen: false });
+          console.log(`✅ Message sent to ${targetJid}: ${content}`);
+        } catch (sendErr) {
+          const fullStr =
+            sendErr instanceof Error
+              ? `${sendErr.message || ""}\n${sendErr.stack || ""}`
+              : String(sendErr);
+          const isPuppeteerEval = /ExecutionContext|Execution context|evaluate|t: t|ExecutionContext was destroyed|Cannot find context/i.test(fullStr);
+          console.warn(`⚠️ sendMessage failed for ${targetJid}:`, fullStr, `- puppeteerEval:${isPuppeteerEval}`);
+
+          if (isPuppeteerEval) {
+            console.warn(`🔁 Attempting client recovery for agent ${agent.id}`);
+            try {
+              await WhatsAppManager.logout(agent.id).catch(() => {});
+            } catch (e) {}
+            await new Promise((r) => setTimeout(r, 1500));
+            const newClient = await WhatsAppManager.getClient(agent.id);
+            if (!newClient) throw sendErr;
+            await new Promise((r) => setTimeout(r, 2000));
+            await newClient.sendMessage(targetJid, content, { sendSeen: false });
+            console.log(`✅ Message sent after recovery to ${targetJid}: ${content}`);
+          } else {
+            console.warn(`⚠️ Non-puppeteer error, retrying once for ${targetJid}`);
+            await new Promise((r) => setTimeout(r, 1000));
+            await client.sendMessage(targetJid, content, { sendSeen: false });
+            console.log(`✅ Message sent on retry to ${targetJid}: ${content}`);
+          }
+        }
       } catch (error) {
         console.error(`❌ Failed to send message to ${chat.remoteJid}:`, error);
         if (
@@ -1132,104 +1226,305 @@ export async function registerRoutes(
     }
   });
 
-  app.post(api.open.chats.messages.send.path, async (req, res) => {
-    try {
-      const tenantId = parseInt(
-        Array.isArray(req.params.tenantId)
-          ? req.params.tenantId[0]
-          : req.params.tenantId,
-      );
-      const agentId = parseInt(
-        Array.isArray(req.params.agentId)
-          ? req.params.agentId[0]
-          : req.params.agentId,
-      );
-      const chatId = parseInt(
-        Array.isArray(req.params.chatId)
-          ? req.params.chatId[0]
-          : req.params.chatId,
-      );
+  // app.post(api.open.chats.messages.send.path, async (req, res) => {
+  //   try {
+  //     const tenantId = parseInt(
+  //       Array.isArray(req.params.tenantId)
+  //         ? req.params.tenantId[0]
+  //         : req.params.tenantId,
+  //     );
+  //     const agentId = parseInt(
+  //       Array.isArray(req.params.agentId)
+  //         ? req.params.agentId[0]
+  //         : req.params.agentId,
+  //     );
+  //     const chatId = parseInt(
+  //       Array.isArray(req.params.chatId)
+  //         ? req.params.chatId[0]
+  //         : req.params.chatId,
+  //     );
        
-      console.log("tenant id:", tenantId);
-      console.log("agent id:", agentId);
-      console.log("chat id:", chatId);
-      const { content } = req.body;
+  //     console.log("tenant id:", tenantId);
+  //     console.log("agent id:", agentId);
+  //     console.log("chat id:", chatId);
+  //     const { content } = req.body;
 
-      if (!tenantId || !agentId || !chatId) {
-        return res
-          .status(400)
-          .json({ message: "Missing tenantId, agentId, or chatId" });
-      }
+  //     if (!tenantId || !agentId || !chatId) {
+  //       return res
+  //         .status(400)
+  //         .json({ message: "Missing tenantId, agentId, or chatId" });
+  //     }
 
-      if (!content || content.trim() === "") {
-        return res.status(400).json({ message: "Message content is required" });
-      }
+  //     if (!content || content.trim() === "") {
+  //       return res.status(400).json({ message: "Message content is required" });
+  //     }
 
-      // Fetch the chat to make sure it belongs to this tenant & agent
-      const chat = await storage.getChat(chatId);
-      if (
-        !chat ||
-        chat.tenantId !== tenantId ||
-        chat.assignedAgentId !== agentId
-      ) {
-        return res
-          .status(404)
-          .json({ message: "Chat not found for this agent/tenant" });
-      }
+  //     // Fetch the chat to make sure it belongs to this tenant & agent
+  //     const chat = await storage.getChat(chatId);
+  //     if (
+  //       !chat ||
+  //       chat.tenantId !== tenantId ||
+  //       chat.assignedAgentId !== agentId
+  //     ) {
+  //       return res
+  //         .status(404)
+  //         .json({ message: "Chat not found for this agent/tenant" });
+  //     }
 
-      const client = await WhatsAppManager.getClient(agentId);
+  //     const client = await WhatsAppManager.getClient(agentId);
+  //     if (client) {
+  //       try {
+  //         // Check if client is ready
+  //         const state = await client.getState();
+  //         if (state !== "CONNECTED") {
+  //           console.warn(`⚠️ WhatsApp client not connected. State: ${state}`);
+  //           return res
+  //             .status(503)
+  //             .json({ message: "WhatsApp client not connected" });
+  //         }
 
-      if(client){
-        try{
-        const state = await client.getState();
+  //         // Add small delay to ensure stability
+  //         await new Promise((resolve) => setTimeout(resolve, 2000));
 
+  //         // Try to get the chat first to ensure it exists
+  //         const whatsappChat = await client.getChatById(chat.remoteJid);
+  //         if (!whatsappChat) {
+  //           console.warn(`⚠️ Chat ${chat.remoteJid} not found in WhatsApp`);
+  //           return res
+  //             .status(404)
+  //             .json({ message: "Chat not found in WhatsApp" });
+  //         }
 
-         if (state !== "CONNECTED") {
-          console.warn(`⚠️ WhatsApp client not connected. State: ${state}`);
-          return res
-            .status(503)
-            .json({ message: "WhatsApp client not connected" });
-        }
+  //         // Normalize remoteJid to ensure WhatsApp identifier format
+  //         let targetJid = chat.remoteJid;
+  //         if (!targetJid.includes("@")) {
+  //           const digits = String(targetJid).replace(/\D/g, "");
+  //           targetJid = `${digits}@c.us`;
+  //         }
 
-         await new Promise((resolve) => setTimeout(resolve, 2000));
+  //         // Helper: attempt send with recovery on puppeteer evaluation errors
+  //         const agentIdNumber = agentId;
+  //         try {
+  //           await client.sendMessage(targetJid, content, { sendSeen: false });
+  //           console.log(`✅ Message sent to ${targetJid}: ${content}`);
+  //         } catch (sendErr) {
+  //           const fullStr =
+  //             sendErr instanceof Error
+  //               ? `${sendErr.message || ""}\n${sendErr.stack || ""}`
+  //               : String(sendErr);
+  //           const isPuppeteerEval = /ExecutionContext|Execution context|evaluate|t: t|ExecutionContext was destroyed|Cannot find context/i.test(fullStr);
+  //           const isSessionError = /session|auth|qr|disconnected|not connected/i.test(fullStr);
+  //           console.warn(`⚠️ sendMessage failed for ${targetJid}:`, fullStr, `- puppeteerEval:${isPuppeteerEval}, sessionError:${isSessionError}`);
 
-          await client.sendMessage(chat.remoteJid, content, { sendSeen: false });
-        console.log(`✅ Message sent to ${chat.remoteJid}: ${content}`);
+  //           if (isPuppeteerEval || isSessionError) {
+  //             console.warn(`🔁 Attempting client recovery for agent ${agentIdNumber}`);
+  //             try {
+  //               await WhatsAppManager.logout(agentIdNumber).catch(() => {});
+  //             } catch (e) {}
+  //             // Wait briefly for resources to be cleaned up
+  //             await new Promise((r) => setTimeout(r, 1500));
+  //             const newClient = await WhatsAppManager.getClient(agentIdNumber);
+  //             if (!newClient) throw sendErr;
+  //             // Give the new client a moment to stabilize
+  //             await new Promise((r) => setTimeout(r, 2000));
+  //             await newClient.sendMessage(targetJid, content, { sendSeen: false });
+  //             console.log(`✅ Message sent after recovery to ${targetJid}: ${content}`);
+  //           } else {
+  //             // Non-puppeteer/session error - single retry
+  //             console.warn(`⚠️ Non-critical error, retrying once for ${targetJid}`);
+  //             await new Promise((r) => setTimeout(r, 1000));
+  //             await client.sendMessage(targetJid, content, { sendSeen: false });
+  //             console.log(`✅ Message sent on retry to ${targetJid}: ${content}`);
+  //           }
+  //         }
+  //       } catch (error) {
+  //         console.error(`❌ Failed to send message to ${chat.remoteJid}:`, error);
 
-      }  catch (error) {
-        console.error(`❌ Failed to send message to ${chat.remoteJid}:`, error);
+  //         // Check if it's a common whatsapp-web.js error
+  //         if (
+  //           error instanceof Error &&
+  //           error.message &&
+  //           error.message.includes("markedUnread")
+  //         ) {
+  //           console.warn(
+  //             `⚠️ WhatsApp Web session issue detected. Client may need re-authentication.`,
+  //           );
+  //           return res.status(503).json({
+  //             message: "WhatsApp session needs refresh. Please re-scan QR code.",
+  //             code: "SESSION_EXPIRED",
+  //           });
+  //         }
 
-        // Check if it's a common whatsapp-web.js error
-        if (
-          error instanceof Error &&
-          error.message &&
-          error.message.includes("markedUnread")
-        ) {
-          console.warn(
-            `⚠️ WhatsApp Web session issue detected. Client may need re-authentication.`,
-          );
-          return res.status(503).json({
-            message: "WhatsApp session needs refresh. Please re-scan QR code.",
-            code: "SESSION_EXPIRED",
-          });
-        }
+  //         return res
+  //           .status(500)
+  //           .json({ message: "Failed to send message via WhatsApp" });
+  //       }
+  //     } else {
+  //       console.warn(
+  //         `⚠️ No WhatsApp client available for agent ${agentId}`,
+  //       );
+  //       return res.status(503).json({ message: "WhatsApp client not available" });
+  //     }
 
-        return res
-          .status(500)
-          .json({ message: "Failed to send message via WhatsApp" });
-      }
+  //     // ⚡ Return response immediately with temporary message ID
+  //     // Let client know message was sent to WhatsApp
+  //     const tempMessageId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
+  //     res.status(201).json({
+  //       id: tempMessageId,
+  //       chatId,
+  //       tenantId: tenantId,
+  //       content,
+  //       type: "text",
+  //       fromMe: true,
+  //       senderName: "Agent",
+  //       timestamp: new Date().toISOString(),
+  //       isSaving: true,
+  //     });
 
-      } else {
-      console.warn(
-        `⚠️ No WhatsApp client available for agent ${agentId}`,
-      );
-      return res.status(503).json({ message: "WhatsApp client not available" });
+  //     // 🔄 BACKGROUND: Save to database asynchronously (don't wait)
+  //     storage
+  //       .createMessage({
+  //         chatId,
+  //         tenantId: tenantId,
+  //         content,
+  //         type: "text",
+  //         fromMe: true,
+  //         senderName: "Agent",
+  //       })
+  //       .then((savedMessage) => {
+  //         console.log(
+  //           `💾 [BACKGROUND] Message saved to DB with ID: ${savedMessage.id}`,
+  //         );
+  //         io.to(`chat_${chatId}`).emit("message_saved", {
+  //           tempId: tempMessageId,
+  //           id: savedMessage.id,
+  //         });
+  //         io.to(`agent_${agentId}`).emit("message_saved", {
+  //           tempId: tempMessageId,
+  //           id: savedMessage.id,
+  //         });
+  //       })
+  //       .catch((error) => {
+  //         console.error(`❌ [BACKGROUND] Failed to save message to DB:`, error);
+  //         io.to(`chat_${chatId}`).emit("message_save_error", {
+  //           tempId: tempMessageId,
+  //           error: "Failed to save message",
+  //         });
+  //       });
+  //   } catch (err) {
+  //     console.error("Error in sendMessage endpoint:", err);
+  //     res.status(400).json({ message: "Invalid input" });
+  //   }
+  // });
+
+  // ============================
+
+  // === SWAGGER UI ===
+ 
+ app.post(api.open.chats.messages.send.path, async (req, res) => {
+  try {
+    const tenantId = Number(req.params.tenantId);
+    const agentId = Number(req.params.agentId);
+    const chatId = Number(req.params.chatId);
+    const { content } = req.body;
+
+    console.log("OPEN SEND:", { tenantId, agentId, chatId, content });
+
+    if (!tenantId || !agentId || !chatId) {
+      return res.status(400).json({
+        message: "Missing tenantId, agentId, or chatId",
+      });
     }
 
-   const tempMessageId = `temp-${Date.now()}-${Math.random()
+    if (!content || !content.trim()) {
+      return res.status(400).json({
+        message: "Message content is required",
+      });
+    }
+
+    const chat = await storage.getChat(chatId);
+    if (!chat || chat.tenantId !== tenantId) {
+      return res.status(404).json({
+        message: "Chat not found for this tenant",
+      });
+    }
+
+    let targetJid = chat.remoteJid;
+    if (!targetJid.includes("@")) {
+      const digits = String(targetJid).replace(/\D/g, "");
+      targetJid = `${digits}@c.us`;
+    }
+
+    // 🔄 Get / revive WhatsApp client
+    let client = await WhatsAppManager.getClient(agentId);
+    if (!client) {
+      return res.status(503).json({
+        message: "WhatsApp client not available for this agent",
+      });
+    }
+
+    // 🛡️ Detect dead puppeteer context early
+    try {
+      await client.getState();
+    } catch {
+      console.warn("⚠️ Dead client context detected, recreating...");
+      await WhatsAppManager.logout(agentId).catch(() => {});
+      await new Promise(r => setTimeout(r, 1500));
+      client = await WhatsAppManager.getClient(agentId);
+    }
+
+    if (!client) {
+      return res.status(503).json({
+        message: "Failed to recover WhatsApp client",
+      });
+    }
+
+    // 🚀 Send message with retry logic
+    let currentClient: InstanceType<typeof Client> = client;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        await currentClient.sendMessage(targetJid, content, { sendSeen: false });
+        console.log(`✅ Message sent to ${targetJid} on attempt ${attempt + 1}`);
+        break; // Success, exit loop
+      } catch (sendErr) {
+        const fullStr =
+          sendErr instanceof Error
+            ? `${sendErr.message || ""}\n${sendErr.stack || ""}`
+            : String(sendErr);
+        const isPuppeteerEval = /ExecutionContext|Execution context|evaluate|t: t|ExecutionContext was destroyed|Cannot find context|Cannot read properties of undefined/i.test(fullStr);
+        const isSessionError = /session|auth|qr|disconnected|not connected/i.test(fullStr);
+
+        console.warn(`⚠️ sendMessage failed on attempt ${attempt + 1}:`, fullStr, `- puppeteerEval:${isPuppeteerEval}, sessionError:${isSessionError}`);
+
+        if (isPuppeteerEval || isSessionError) {
+          if (attempt < 2) { // Only retry if not the last attempt
+            console.warn(`🔁 Attempting client recovery for agent ${agentId}`);
+            await WhatsAppManager.logout(agentId).catch(() => {});
+            await new Promise(r => setTimeout(r, 3000));
+            const newClient = await WhatsAppManager.getClient(agentId);
+            if (!newClient) throw sendErr;
+            currentClient = newClient;
+            // Ensure the new client is connected
+            try {
+              const state = await currentClient.getState();
+              if (state !== "CONNECTED") throw sendErr;
+            } catch (stateErr) {
+              console.warn("⚠️ Client state check failed, continuing anyway");
+            }
+          } else {
+            throw sendErr; // Last attempt, rethrow
+          }
+        } else {
+          throw sendErr; // Non-recoverable error
+        }
+      }
+    }
+
+    // ⚡ Immediate response
+    const tempMessageId = `temp-${Date.now()}-${Math.random()
       .toString(36)
-      .slice(2)}`;
+      .slice(2, 9)}`;
 
     res.status(201).json({
       id: tempMessageId,
@@ -1243,7 +1538,7 @@ export async function registerRoutes(
       isSaving: true,
     });
 
-    // 🔄 BACKGROUND DB SAVE
+    // 💾 Background DB save
     storage
       .createMessage({
         chatId,
@@ -1258,35 +1553,185 @@ export async function registerRoutes(
           tempId: tempMessageId,
           id: saved.id,
         });
-
         io.to(`agent_${agentId}`).emit("message_saved", {
           tempId: tempMessageId,
           id: saved.id,
         });
-
-        console.log(`💾 Message saved with ID ${saved.id}`);
       })
       .catch((err) => {
-        console.error("❌ DB save failed:", err);
-
+        console.error("❌ Failed to save message:", err);
         io.to(`chat_${chatId}`).emit("message_save_error", {
           tempId: tempMessageId,
           error: "Failed to save message",
         });
       });
 
+  } catch (err) {
+    console.error("❌ OPEN SEND API ERROR:", err);
+    res.status(500).json({
+      message: "Failed to send message via WhatsApp",
+    });
+  }
+});
 
-    
+
+ app.post(api.chats.sendMessage2.path, async (req, res) => {
+  const chatId = parseInt(
+    Array.isArray(req.params.id) ? req.params.id[0] : req.params.id,
+  );
+  const agentId = Number(req.params.agentId);
+  const { content } = api.chats.sendMessage.input.parse(req.body);
+
+  console.log(
+    `📤 Message send request - Chat ID: ${chatId}, Content: "${content}"`
+  );
+
+  const chat = await storage.getChat(chatId);
+  if (!chat) {
+    return res.status(404).json({ message: "Chat not found" });
+  }
+
+  const client = await WhatsAppManager.getClient(agentId);
+  if (!client) {
+    return res.status(503).json({ message: "WhatsApp client not available" });
+  }
+
+  // Normalize JID
+  let targetJid = chat.remoteJid;
+  if (!/@c\.us|@g\.us$/.test(targetJid)) {
+    const digits = targetJid.replace(/\D/g, "");
+    targetJid = `${digits}@c.us`;
+  }
+
+  /**
+   * STEP 1: soft retry on existing client
+   */
+  const sendWithSoftRetry = async () => {
+    try {
+      await client.sendMessage(targetJid, content, { sendSeen: false });
+      return true;
     } catch (err) {
-      console.error(err);
-      return res.status(500).json({ message: "Failed to send message" });
+      const msg =
+        err instanceof Error ? err.stack || err.message : String(err);
+
+      const isExecutionCtx =
+        /ExecutionContext|t: t|evaluate|destroyed/i.test(msg);
+
+      if (!isExecutionCtx) throw err;
+
+      console.warn("🟡 Execution context lost. Waiting for recovery...");
+
+      // Give WhatsApp Web time to reload
+      await new Promise((r) => setTimeout(r, 3000));
+
+      const state = await client.getState().catch(() => null);
+      if (state === "CONNECTED") {
+        console.log("🔁 Retrying send on existing client...");
+        await client.sendMessage(targetJid, content, { sendSeen: false });
+        return true;
+      }
+
+      throw err;
     }
+  };
+
+  /**
+   * STEP 2: hard recovery (logout + recreate)
+   */
+  const sendWithHardRecovery = async () => {
+    console.warn(`🔴 Hard recovery for agent ${agentId}`);
+
+    await WhatsAppManager.logout(agentId).catch(() => {});
+    await new Promise((r) => setTimeout(r, 2000));
+
+    const newClient = await WhatsAppManager.getClient(agentId);
+    if (!newClient) {
+      throw new Error("Failed to recreate WhatsApp client");
+    }
+
+    // Warm-up time
+    await new Promise((r) => setTimeout(r, 4000));
+
+    await newClient.sendMessage(targetJid, content, { sendSeen: false });
+  };
+
+  /**
+   * SEND FLOW
+   */
+  try {
+    const state = await client.getState().catch(() => null);
+    if (state !== "CONNECTED") {
+      throw new Error(`Client not ready. State=${state}`);
+    }
+
+    await sendWithSoftRetry();
+    console.log(`✅ Message sent to ${targetJid}`);
+  } catch (error) {
+    console.warn("⚠️ Soft retry failed. Attempting hard recovery...");
+    try {
+      await sendWithHardRecovery();
+      console.log(`✅ Message sent after hard recovery to ${targetJid}`);
+    } catch (finalErr) {
+      console.error("❌ Message send failed:", finalErr);
+      return res
+        .status(500)
+        .json({ message: "Failed to send message via WhatsApp" });
+    }
+  }
+
+  /**
+   * IMMEDIATE RESPONSE
+   */
+  const tempMessageId = `temp-${Date.now()}-${Math.random()
+    .toString(36)
+    .slice(2)}`;
+
+  res.status(201).json({
+    id: tempMessageId,
+    chatId,
+    tenantId: chat.tenantId,
+    content,
+    type: "text",
+    fromMe: true,
+    senderName: "Agent",
+    timestamp: new Date().toISOString(),
+    isSaving: true,
   });
 
-  // ============================
+  /**
+   * BACKGROUND DB SAVE
+   */
+  storage
+    .createMessage({
+      chatId,
+      tenantId: chat.tenantId,
+      content,
+      type: "text",
+      fromMe: true,
+      senderName: "Agent",
+    })
+    .then((savedMessage) => {
+      io.to(`chat_${chatId}`).emit("message_saved", {
+        tempId: tempMessageId,
+        id: savedMessage.id,
+      });
+      io.to(`agent_${agentId}`).emit("message_saved", {
+        tempId: tempMessageId,
+        id: savedMessage.id,
+      });
+    })
+    .catch((err) => {
+      console.error("❌ Failed to save message:", err);
+      io.to(`chat_${chatId}`).emit("message_save_error", {
+        tempId: tempMessageId,
+        error: "Failed to save message",
+      });
+    });
+});
 
-  // === SWAGGER UI ===
-  app.use("/docs", swaggerUiMiddleware, swaggerUiSetup);
+
+ 
+ app.use("/docs", swaggerUiMiddleware, swaggerUiSetup);
 
   return httpServer;
 }
