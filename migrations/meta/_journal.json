@@ -22,6 +22,13 @@
       "when": 1769846399835,
       "tag": "0002_little_purifiers",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1770023938449,
+      "tag": "0003_wide_anthem",
+      "breakpoints": true
     }
   ]
 }

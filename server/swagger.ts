@@ -1,7 +1,6 @@
 // swagger.ts
 import swaggerUi from "swagger-ui-express";
 
-import {api} from '../shared/routes'
 
 // Basic OpenAPI document
 const openApiDoc = {
@@ -12,13 +11,13 @@ const openApiDoc = {
     description: "Comprehensive API documentation for WhatsApp CRM system. This API provides endpoints for managing tenants (companies), agents, WhatsApp connections, chats, and messaging functionality. The 'open' endpoints are publicly accessible and can be used by external systems to integrate with the CRM platform.",
   },
   components: {
-    securitySchemes: {
-      bearerAuth: {
-        type: "http",
-        scheme: "bearer",
-        bearerFormat: "JWT",
-      },
-    },
+    // securitySchemes: {
+    //   bearerAuth: {
+    //     type: "http",
+    //     scheme: "bearer",
+    //     bearerFormat: "JWT",
+    //   },
+    // },
     schemas: {
       Tenant: {
         type: "object",
@@ -591,228 +590,8 @@ const openApiDoc = {
         },
       },
     },
-    "/api/open/chats/{tenantId}/{agentId}/{id}/messages": {
-      post: {
-        summary: "Send Message (Open API)",
-        description: "Sends a message in a specific chat for open API access. This endpoint allows sending messages without authentication, using tenant and agent IDs for identification. The message is sent via WhatsApp and stored in the database asynchronously.",
-        security: [],
-        parameters: [
-          {
-            name: "tenantId",
-            in: "path",
-            required: true,
-            schema: { type: "number" },
-            description: "ID of the tenant",
-          },
-          {
-            name: "agentId",
-            in: "path",
-            required: true,
-            schema: { type: "number" },
-            description: "ID of the agent",
-          },
-          {
-            name: "id",
-            in: "path",
-            required: true,
-            schema: { type: "number" },
-            description: "ID of the chat",
-          },
-        ],
-        requestBody: {
-          required: true,
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  content: { type: "string", description: "Message content" },
-                },
-                required: ["content"],
-              },
-            },
-          },
-        },
-        responses: {
-          201: {
-            description: "Message sent successfully (optimistic response, actual sending is asynchronous)",
-            content: {
-              "application/json": {
-                schema: {
-                  type: "object",
-                  properties: {
-                    id: { type: "string", description: "Temporary message ID" },
-                    chatId: { type: "number" },
-                    tenantId: { type: "number" },
-                    content: { type: "string" },
-                    type: { type: "string" },
-                    fromMe: { type: "boolean" },
-                    senderName: { type: "string" },
-                    timestamp: { type: "string", format: "date-time" },
-                    isSaving: { type: "boolean" },
-                  },
-                },
-              },
-            },
-          },
-          400: {
-            description: "Missing tenantId, agentId, chatId, or message content",
-            content: {
-              "application/json": {
-                schema: { $ref: "#/components/schemas/Error" },
-              },
-            },
-          },
-          404: {
-            description: "Chat not found for this agent/tenant",
-            content: {
-              "application/json": {
-                schema: { $ref: "#/components/schemas/Error" },
-              },
-            },
-          },
-          500: {
-            description: "Failed to send message via WhatsApp",
-            content: {
-              "application/json": {
-                schema: { $ref: "#/components/schemas/Error" },
-              },
-            },
-          },
-          503: {
-            description: "WhatsApp client not connected or session expired",
-            content: {
-              "application/json": {
-                schema: { $ref: "#/components/schemas/Error" },
-              },
-            },
-          },
-        },
-      },
-    },
-    "/api/chats/{id}/messages": {
-      post: {
-        summary: "Send Message",
-        description: "Sends a message in a specific chat. This endpoint requires authentication and allows agents to send messages via WhatsApp. The message is sent asynchronously and stored in the database.",
-        security: [
-          {
-            bearerAuth: [],
-          },
-        ],
-        parameters: [
-          {
-            name: "id",
-            in: "path",
-            required: true,
-            schema: { type: "number" },
-            description: "ID of the chat",
-          },
-        ],
-        requestBody: {
-          required: true,
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  content: { type: "string", description: "Message content" },
-                },
-                required: ["content"],
-              },
-            },
-          },
-        },
-        responses: {
-          201: {
-            description: "Message sent successfully",
-            content: {
-              "application/json": {
-                schema: { $ref: "#/components/schemas/Message" },
-              },
-            },
-          },
-          400: {
-            description: "Missing chat ID or message content",
-            content: {
-              "application/json": {
-                schema: { $ref: "#/components/schemas/Error" },
-              },
-            },
-          },
-          404: {
-            description: "Chat not found",
-            content: {
-              "application/json": {
-                schema: { $ref: "#/components/schemas/Error" },
-              },
-            },
-          },
-        },
-      },
-    },
-    "/api/chats/{agentId}/{id}/messages": {
-      post: {
-        summary: "Send Message with Agent ID",
-        description: "Sends a message in a specific chat for a specific agent. This endpoint allows sending messages without authentication, using agent and chat IDs for identification. The message is sent via WhatsApp and stored in the database asynchronously.",
-        security: [],
-        parameters: [
-          {
-            name: "agentId",
-            in: "path",
-            required: true,
-            schema: { type: "number" },
-            description: "ID of the agent",
-          },
-          {
-            name: "id",
-            in: "path",
-            required: true,
-            schema: { type: "number" },
-            description: "ID of the chat",
-          },
-        ],
-        requestBody: {
-          required: true,
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  content: { type: "string", description: "Message content" },
-                },
-                required: ["content"],
-              },
-            },
-          },
-        },
-        responses: {
-          201: {
-            description: "Message sent successfully",
-            content: {
-              "application/json": {
-                schema: { $ref: "#/components/schemas/Message" },
-              },
-            },
-          },
-          400: {
-            description: "Missing agentId, chat ID or message content",
-            content: {
-              "application/json": {
-                schema: { $ref: "#/components/schemas/Error" },
-              },
-            },
-          },
-          404: {
-            description: "Chat not found",
-            content: {
-              "application/json": {
-                schema: { $ref: "#/components/schemas/Error" },
-              },
-            },
-          },
-        },
-      },
-    },
+   
+   
     "/api/chats/sendMessageNoAuth/{agentId}/{id}": {
   "post": {
     "summary": "Send WhatsApp Message without Authentication",
