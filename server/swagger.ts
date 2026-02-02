@@ -361,6 +361,8 @@ const openApiDoc = {
                     qr: {
                       type: "string",
                       description: "Base64 QR code (if available)",
+                      le: "![QR Code](data:image/jpeg;base64,/9j/2wBDABALDA4MChAO...)"
+
                     },
                   },
                 },
@@ -811,6 +813,86 @@ const openApiDoc = {
         },
       },
     },
+    "/api/chats/sendMessageNoAuth/{agentId}/{id}": {
+  "post": {
+    "summary": "Send WhatsApp Message without Authentication",
+    "description": "Sends a text message to a specific chat using a specific agent. No authentication required. The message is sent via WhatsApp and saved to the database asynchronously.",
+    "security": [],
+    "parameters": [
+      {
+        "name": "agentId",
+        "in": "path",
+        "required": true,
+        "schema": { "type": "integer" },
+        "description": "ID of the WhatsApp agent sending the message"
+      },
+      {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "schema": { "type": "integer" },
+        "description": "Chat ID in the database"
+      }
+    ],
+    "requestBody": {
+      "required": true,
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "properties": {
+              "content": { "type": "string", "description": "Text message to send" }
+            },
+            "required": ["content"]
+          }
+        }
+      }
+    },
+    "responses": {
+      "201": {
+        "description": "Message sent successfully (temporary message ID returned)",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/Message" }
+          }
+        }
+      },
+      "400": {
+        "description": "Missing agentId, chat ID, or message content",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/Error" }
+          }
+        }
+      },
+      "404": {
+        "description": "Chat not found",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/Error" }
+          }
+        }
+      },
+      "503": {
+        "description": "WhatsApp client not available or not connected",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/Error" }
+          }
+        }
+      },
+      "500": {
+        "description": "Failed to send message due to internal error",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/Error" }
+          }
+        }
+      }
+    }
+  }
+}
+
   },
 };
 

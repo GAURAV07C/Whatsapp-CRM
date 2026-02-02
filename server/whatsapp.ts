@@ -53,7 +53,7 @@ export class WhatsAppManager {
         clientId: `agent-${agentId}`,
       }),
       puppeteer: {
-        headless: false,
+        headless: true,
         args: ["--no-sandbox", "--disable-setuid-sandbox"],
       },
     });

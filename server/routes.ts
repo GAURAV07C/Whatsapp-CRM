@@ -1575,117 +1575,204 @@ export async function registerRoutes(
 });
 
 
- app.post(api.chats.sendMessage2.path, async (req, res) => {
-  const chatId = parseInt(
-    Array.isArray(req.params.id) ? req.params.id[0] : req.params.id,
-  );
-  const agentId = Number(req.params.agentId);
+//  app.post(api.chats.sendMessage2.path, async (req, res) => {
+//   const chatId = parseInt(
+//     Array.isArray(req.params.id) ? req.params.id[0] : req.params.id,
+//   );
+//   const agentId = Number(req.params.agentId);
+//   const { content } = api.chats.sendMessage.input.parse(req.body);
+
+//   console.log(
+//     `📤 Message send request - Chat ID: ${chatId}, Content: "${content}"`
+//   );
+
+//   const chat = await storage.getChat(chatId);
+//   if (!chat) {
+//     return res.status(404).json({ message: "Chat not found" });
+//   }
+
+//   const client = await WhatsAppManager.getClient(agentId);
+//   if (!client) {
+//     return res.status(503).json({ message: "WhatsApp client not available" });
+//   }
+
+//   // Normalize JID
+//   let targetJid = chat.remoteJid;
+//   if (!/@c\.us|@g\.us$/.test(targetJid)) {
+//     const digits = targetJid.replace(/\D/g, "");
+//     targetJid = `${digits}@c.us`;
+//   }
+
+//   /**
+//    * STEP 1: soft retry on existing client
+//    */
+//   const sendWithSoftRetry = async () => {
+//     try {
+//       await client.sendMessage(targetJid, content, { sendSeen: false });
+//       return true;
+//     } catch (err) {
+//       const msg =
+//         err instanceof Error ? err.stack || err.message : String(err);
+
+//       const isExecutionCtx =
+//         /ExecutionContext|t: t|evaluate|destroyed/i.test(msg);
+
+//       if (!isExecutionCtx) throw err;
+
+//       console.warn("🟡 Execution context lost. Waiting for recovery...");
+
+//       // Give WhatsApp Web time to reload
+//       await new Promise((r) => setTimeout(r, 3000));
+
+//       const state = await client.getState().catch(() => null);
+//       if (state === "CONNECTED") {
+//         console.log("🔁 Retrying send on existing client...");
+//         await client.sendMessage(targetJid, content, { sendSeen: false });
+//         return true;
+//       }
+
+//       throw err;
+//     }
+//   };
+
+//   /**
+//    * STEP 2: hard recovery (logout + recreate)
+//    */
+//   const sendWithHardRecovery = async () => {
+//     console.warn(`🔴 Hard recovery for agent ${agentId}`);
+
+//     await WhatsAppManager.logout(agentId).catch(() => {});
+//     await new Promise((r) => setTimeout(r, 2000));
+
+//     const newClient = await WhatsAppManager.getClient(agentId);
+//     if (!newClient) {
+//       throw new Error("Failed to recreate WhatsApp client");
+//     }
+
+//     // Warm-up time
+//     await new Promise((r) => setTimeout(r, 4000));
+
+//     await newClient.sendMessage(targetJid, content, { sendSeen: false });
+//   };
+
+//   /**
+//    * SEND FLOW
+//    */
+//   try {
+//     const state = await client.getState().catch(() => null);
+//     if (state !== "CONNECTED") {
+//       throw new Error(`Client not ready. State=${state}`);
+//     }
+
+//     await sendWithSoftRetry();
+//     console.log(`✅ Message sent to ${targetJid}`);
+//   } catch (error) {
+//     console.warn("⚠️ Soft retry failed. Attempting hard recovery...");
+//     try {
+//       await sendWithHardRecovery();
+//       console.log(`✅ Message sent after hard recovery to ${targetJid}`);
+//     } catch (finalErr) {
+//       console.error("❌ Message send failed:", finalErr);
+//       return res
+//         .status(500)
+//         .json({ message: "Failed to send message via WhatsApp" });
+//     }
+//   }
+
+//   /**
+//    * IMMEDIATE RESPONSE
+//    */
+//   const tempMessageId = `temp-${Date.now()}-${Math.random()
+//     .toString(36)
+//     .slice(2)}`;
+
+//   res.status(201).json({
+//     id: tempMessageId,
+//     chatId,
+//     tenantId: chat.tenantId,
+//     content,
+//     type: "text",
+//     fromMe: true,
+//     senderName: "Agent",
+//     timestamp: new Date().toISOString(),
+//     isSaving: true,
+//   });
+
+//   /**
+//    * BACKGROUND DB SAVE
+//    */
+//   storage
+//     .createMessage({
+//       chatId,
+//       tenantId: chat.tenantId,
+//       content,
+//       type: "text",
+//       fromMe: true,
+//       senderName: "Agent",
+//     })
+//     .then((savedMessage) => {
+//       io.to(`chat_${chatId}`).emit("message_saved", {
+//         tempId: tempMessageId,
+//         id: savedMessage.id,
+//       });
+//       io.to(`agent_${agentId}`).emit("message_saved", {
+//         tempId: tempMessageId,
+//         id: savedMessage.id,
+//       });
+//     })
+//     .catch((err) => {
+//       console.error("❌ Failed to save message:", err);
+//       io.to(`chat_${chatId}`).emit("message_save_error", {
+//         tempId: tempMessageId,
+//         error: "Failed to save message",
+//       });
+//     });
+// });
+
+
+ app.post("/api/chats/sendMessageNoAuth/:agentId/:id", async (req, res) => {
+  const chatId = parseInt(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id);
+  const agentId = Number(req.params.agentId); // mandatory for auth-less
   const { content } = api.chats.sendMessage.input.parse(req.body);
 
-  console.log(
-    `📤 Message send request - Chat ID: ${chatId}, Content: "${content}"`
-  );
-
-  const chat = await storage.getChat(chatId);
-  if (!chat) {
-    return res.status(404).json({ message: "Chat not found" });
+  if (!agentId) {
+    return res.status(400).json({ message: "Agent ID required" });
   }
 
-  const client = await WhatsAppManager.getClient(agentId);
+  console.log(`📤 Message request (no auth) - Chat ${chatId}, Agent ${agentId}, Content: "${content}"`);
+
+  const chat = await storage.getChat(chatId);
+  if (!chat) return res.status(404).json({ message: "Chat not found" });
+
+  // Get client
+  let client = await WhatsAppManager.getClient(agentId);
   if (!client) {
     return res.status(503).json({ message: "WhatsApp client not available" });
   }
 
-  // Normalize JID
-  let targetJid = chat.remoteJid;
-  if (!/@c\.us|@g\.us$/.test(targetJid)) {
-    const digits = targetJid.replace(/\D/g, "");
-    targetJid = `${digits}@c.us`;
-  }
-
-  /**
-   * STEP 1: soft retry on existing client
-   */
-  const sendWithSoftRetry = async () => {
-    try {
-      await client.sendMessage(targetJid, content, { sendSeen: false });
-      return true;
-    } catch (err) {
-      const msg =
-        err instanceof Error ? err.stack || err.message : String(err);
-
-      const isExecutionCtx =
-        /ExecutionContext|t: t|evaluate|destroyed/i.test(msg);
-
-      if (!isExecutionCtx) throw err;
-
-      console.warn("🟡 Execution context lost. Waiting for recovery...");
-
-      // Give WhatsApp Web time to reload
-      await new Promise((r) => setTimeout(r, 3000));
-
-      const state = await client.getState().catch(() => null);
-      if (state === "CONNECTED") {
-        console.log("🔁 Retrying send on existing client...");
-        await client.sendMessage(targetJid, content, { sendSeen: false });
-        return true;
-      }
-
-      throw err;
-    }
-  };
-
-  /**
-   * STEP 2: hard recovery (logout + recreate)
-   */
-  const sendWithHardRecovery = async () => {
-    console.warn(`🔴 Hard recovery for agent ${agentId}`);
-
-    await WhatsAppManager.logout(agentId).catch(() => {});
-    await new Promise((r) => setTimeout(r, 2000));
-
-    const newClient = await WhatsAppManager.getClient(agentId);
-    if (!newClient) {
-      throw new Error("Failed to recreate WhatsApp client");
-    }
-
-    // Warm-up time
-    await new Promise((r) => setTimeout(r, 4000));
-
-    await newClient.sendMessage(targetJid, content, { sendSeen: false });
-  };
-
-  /**
-   * SEND FLOW
-   */
+  // Same send logic (soft/hard recovery) as your working auth version
   try {
-    const state = await client.getState().catch(() => null);
+    const state = await client.getState();
     if (state !== "CONNECTED") {
-      throw new Error(`Client not ready. State=${state}`);
+      console.warn(`⚠️ WhatsApp client not connected. State: ${state}`);
+      return res.status(503).json({ message: "WhatsApp client not connected" });
     }
 
-    await sendWithSoftRetry();
-    console.log(`✅ Message sent to ${targetJid}`);
-  } catch (error) {
-    console.warn("⚠️ Soft retry failed. Attempting hard recovery...");
-    try {
-      await sendWithHardRecovery();
-      console.log(`✅ Message sent after hard recovery to ${targetJid}`);
-    } catch (finalErr) {
-      console.error("❌ Message send failed:", finalErr);
-      return res
-        .status(500)
-        .json({ message: "Failed to send message via WhatsApp" });
+    let targetJid = chat.remoteJid;
+    if (!targetJid.includes("@")) {
+      const digits = String(targetJid).replace(/\D/g, "");
+      targetJid = `${digits}@c.us`;
     }
+
+    await client.sendMessage(targetJid, content, { sendSeen: false });
+    console.log(`✅ Message sent to ${targetJid}: ${content}`);
+  } catch (err) {
+    console.error("❌ Failed to send message (no auth):", err);
+    return res.status(500).json({ message: "Failed to send message via WhatsApp" });
   }
 
-  /**
-   * IMMEDIATE RESPONSE
-   */
-  const tempMessageId = `temp-${Date.now()}-${Math.random()
-    .toString(36)
-    .slice(2)}`;
-
+  // Immediate response + background save
+  const tempMessageId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   res.status(201).json({
     id: tempMessageId,
     chatId,
@@ -1698,39 +1785,22 @@ export async function registerRoutes(
     isSaving: true,
   });
 
-  /**
-   * BACKGROUND DB SAVE
-   */
-  storage
-    .createMessage({
-      chatId,
-      tenantId: chat.tenantId,
-      content,
-      type: "text",
-      fromMe: true,
-      senderName: "Agent",
-    })
-    .then((savedMessage) => {
-      io.to(`chat_${chatId}`).emit("message_saved", {
-        tempId: tempMessageId,
-        id: savedMessage.id,
-      });
-      io.to(`agent_${agentId}`).emit("message_saved", {
-        tempId: tempMessageId,
-        id: savedMessage.id,
-      });
-    })
-    .catch((err) => {
-      console.error("❌ Failed to save message:", err);
-      io.to(`chat_${chatId}`).emit("message_save_error", {
-        tempId: tempMessageId,
-        error: "Failed to save message",
-      });
-    });
+  storage.createMessage({
+    chatId,
+    tenantId: chat.tenantId,
+    content,
+    type: "text",
+    fromMe: true,
+    senderName: "Agent",
+  }).then(savedMessage => {
+    io.to(`chat_${chatId}`).emit("message_saved", { tempId: tempMessageId, id: savedMessage.id });
+    io.to(`agent_${agentId}`).emit("message_saved", { tempId: tempMessageId, id: savedMessage.id });
+  }).catch(error => {
+    console.error("❌ Failed to save message (no auth):", error);
+    io.to(`chat_${chatId}`).emit("message_save_error", { tempId: tempMessageId, error: "Failed to save message" });
+  });
 });
 
-
- 
  app.use("/docs", swaggerUiMiddleware, swaggerUiSetup);
 
   return httpServer;
