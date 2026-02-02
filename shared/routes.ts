@@ -101,7 +101,7 @@ export const api = {
       },
       getAgentByAgentId: {
         method: "GET" as const,
-        path: "/api/open/agents/agent/:tenantId/:agentId",
+        path: "/api/open/tend/agent/:tenantId/:agentId",
         responses: {
           200: z.custom<typeof agents.$inferSelect>(),
         },
