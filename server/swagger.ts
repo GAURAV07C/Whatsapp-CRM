@@ -1,6 +1,8 @@
 // swagger.ts
 import swaggerUi from "swagger-ui-express";
 
+import {api} from '../shared/routes'
+
 // Basic OpenAPI document
 const openApiDoc = {
   openapi: "3.0.0",
@@ -512,7 +514,7 @@ const openApiDoc = {
         },
       },
     },
-    "/api/open/chat/{tenantId}/{agentId}/{chatId}": {
+    "/api/open/chats/{tenantId}/{agentId}/{chatId}/messages": {
       get: {
         summary: "Get Messages by Chat ID",
         description: "Retrieves the complete message history for a specific chat conversation. This endpoint returns all messages in chronological order, including both incoming customer messages and outgoing agent responses. Each message includes sender information, content, timestamp, and message type. This is essential for displaying chat history in CRM interfaces and maintaining conversation context.",

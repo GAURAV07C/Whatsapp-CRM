@@ -136,71 +136,40 @@ export const api = {
       },
     },
 
-    chats: {
-      list: {
-        method: "GET" as const,
-        path: "/api/open/chats/:tenantId",
-        responses: {
-          200: z.array(z.custom<typeof chats.$inferSelect>()),
-        },
-      },
-      create: {
-        method: "POST" as const,
-        path: "/api/open/chats/:tenantId/:agentId",
-        input: z.object({
-          remoteJid: z.string(),
-          customerName: z.string().optional(),
-        }),
-        responses: {
-          201: z.custom<typeof chats.$inferSelect>(),
-        },
-      },
-      get: {
-        method: "GET" as const,
-        path: "/api/open/chats/:tenantId/:agentId",
-        responses: {
-          200: z.custom<
-            typeof chats.$inferSelect & {
-              messages: (typeof chats.$inferSelect)[];
-            }
-          >(),
-          404: errorSchemas.notFound,
-        },
-      },
+   chats: {
+  list: {
+    method: "GET",
+    path: "/api/open/chats/:tenantId",
+  },
 
-      getMessage: {
-        method: "GET" as const,
-        path: "/api/open/chat/:tenantId/:agentId/:chatId",
+  create: {
+    method: "POST",
+    path: "/api/open/chats/:tenantId/:agentId",
+  },
 
-        response: {
-          200: z.custom<
-            typeof chats.$inferSelect & {
-              messages: (typeof messages.$inferSelect)[];
-            }
-          >(),
-          404: errorSchemas.notFound,
-        },
-      },
+  get: {
+    method: "GET",
+    path: "/api/open/chats/:tenantId/:agentId/:chatId",
+  },
 
-      sendMessage: {
-        method: "POST" as const,
-        path: "/api/chats/:tenantId/:agentId/:id/messages",
-        input: z.object({
-          content: z.string(),
-        }),
-        responses: {
-          201: z.custom<typeof messages.$inferSelect>(),
-        },
-      },
-      delete: {
-        method: "DELETE" as const,
-        path: "/api/chats/:id",
-        responses: {
-          200: z.object({ success: z.boolean() }),
-          404: errorSchemas.notFound,
-        },
-      },
+  messages: {
+    list: {
+      method: "GET",
+      path: "/api/open/chats/:tenantId/:agentId/:chatId/messages",
     },
+
+    send: {
+      method: "POST",
+      path: "/api/open/chats/:tenantId/:agentId/:chatId/messages",
+    },
+  },
+
+  delete: {
+    method: "DELETE",
+    path: "/api/open/chats/:tenantId/:agentId/:chatId",
+  },
+}
+
   },
 
   whatsapp: {

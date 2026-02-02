@@ -9,6 +9,7 @@ import { auth } from "./middleware/auth";
 // import { Chat } from "whatsapp-web.js";
 import { Chat, Message } from "@shared/schema";
 import { swaggerUiMiddleware, swaggerUiSetup } from "./swagger";
+import { table } from "console";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -986,6 +987,9 @@ export async function registerRoutes(
           ? req.params.tenantId[0]
           : req.params.tenantId,
       );
+
+      console.log("tanent id",tenantId);
+
       if (!tenantId) {
         return res.status(400).json({ message: "Missing tenantId" });
       }
@@ -1063,7 +1067,72 @@ export async function registerRoutes(
     }
   });
 
-  app.post(api.open.chats.sendMessage.path, async (req, res) => {
+  // GET messages for a specific chat
+  app.get(api.open.chats.messages.list.path, async (req, res) => {
+    res.set("Cache-Control", "no-store");
+    try {
+      console.log("📍 DEBUG - req.params:", req.params);
+      console.log("📍 DEBUG - req.originalUrl:", req.originalUrl);
+      
+      let tenantId = parseInt(
+        Array.isArray(req.params.tenantId)
+          ? req.params.tenantId[0]
+          : req.params.tenantId,
+      );
+      
+      let agentId = parseInt(
+        Array.isArray(req.params.agentId)
+          ? req.params.agentId[0]
+          : req.params.agentId,
+      );
+      
+      let chatId = parseInt(
+        Array.isArray(req.params.chatId)
+          ? req.params.chatId[0]
+          : req.params.chatId,
+      );
+      
+      // Fallback: manually parse URL if req.params didn't work
+      if (isNaN(tenantId) || isNaN(agentId) || isNaN(chatId)) {
+        const matches = req.originalUrl.match(/\/api\/open\/chats\/(\d+)\/(\d+)\/(\d+)/);
+        if (matches) {
+          tenantId = parseInt(matches[1]);
+          agentId = parseInt(matches[2]);
+          chatId = parseInt(matches[3]);
+          console.log("✅ Parsed from URL manually - tenantId:", tenantId, "agentId:", agentId, "chatId:", chatId);
+        }
+      }
+      
+      console.log("tenant id:", tenantId);
+      console.log("agent id:", agentId);
+      console.log("chat id:", chatId);
+      if (!tenantId || !agentId || !chatId) {
+        return res
+          .status(400)
+          .json({ message: "Missing tenantId, agentId, or chatId" });
+      }
+
+      // Verify chat belongs to tenant & agent
+      const chat = await storage.getChat(chatId);
+      if (
+        !chat ||
+        chat.tenantId !== tenantId ||
+        chat.assignedAgentId !== agentId
+      ) {
+        return res
+          .status(404)
+          .json({ message: "Chat not found for this agent/tenant" });
+      }
+
+      const messages = await storage.getMessages(chatId);
+      res.status(200).json(messages);
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ message: "Failed to fetch messages" });
+    }
+  });
+
+  app.post(api.open.chats.messages.send.path, async (req, res) => {
     try {
       const tenantId = parseInt(
         Array.isArray(req.params.tenantId)
@@ -1076,8 +1145,14 @@ export async function registerRoutes(
           : req.params.agentId,
       );
       const chatId = parseInt(
-        Array.isArray(req.params.id) ? req.params.id[0] : req.params.id,
+        Array.isArray(req.params.chatId)
+          ? req.params.chatId[0]
+          : req.params.chatId,
       );
+       
+      console.log("tenant id:", tenantId);
+      console.log("agent id:", agentId);
+      console.log("chat id:", chatId);
       const { content } = req.body;
 
       if (!tenantId || !agentId || !chatId) {
@@ -1102,7 +1177,7 @@ export async function registerRoutes(
           .json({ message: "Chat not found for this agent/tenant" });
       }
 
-      const client = await WhatsAppManager.getClient(req.user!.agentId);
+      const client = await WhatsAppManager.getClient(agentId);
 
       if(client){
         try{
@@ -1117,15 +1192,6 @@ export async function registerRoutes(
         }
 
          await new Promise((resolve) => setTimeout(resolve, 2000));
-
-          const whatsappChat = await client.getChatById(chat.remoteJid);
-
-           if (!whatsappChat) {
-          console.warn(`⚠️ Chat ${chat.remoteJid} not found in WhatsApp`);
-          return res
-            .status(404)
-            .json({ message: "Chat not found in WhatsApp" });
-        }
 
           await client.sendMessage(chat.remoteJid, content, { sendSeen: false });
         console.log(`✅ Message sent to ${chat.remoteJid}: ${content}`);
@@ -1156,7 +1222,7 @@ export async function registerRoutes(
 
       } else {
       console.warn(
-        `⚠️ No WhatsApp client available for agent ${req.user!.agentId}`,
+        `⚠️ No WhatsApp client available for agent ${agentId}`,
       );
       return res.status(503).json({ message: "WhatsApp client not available" });
     }
