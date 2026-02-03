@@ -148,11 +148,16 @@ export class WhatsAppManager {
     console.log(`🎧 [AGENT ${agentId}] Setting up message event listener`);
     client.on("message", async (msg) => {
       // Log incoming messages from client
-      if (!msg.fromMe) {
-        console.log(
-          `📨 [CLIENT MESSAGE] From: ${msg.from}, Body: "${msg.body}"`,
-        );
-      }
+       if (msg.isStatus || msg.from === "status@broadcast") return;
+      
+       if (msg.from.endsWith("@g.us")) return;
+
+    // 3️⃣ System / update / ephemeral / protocol / call messages
+    const ignoredTypes = ["protocol", "ephemeral", "system", "call", "image", "video", "audio", "document", "sticker", "location", "vcard"];
+    if (ignoredTypes.includes(msg.type)) return;
+
+    
+
       // <<<<<<< HEAD
       console.log("💕❤🎁");
       // =======

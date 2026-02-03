@@ -590,8 +590,278 @@ const openApiDoc = {
         },
       },
     },
-   
-   
+    "/api/open/chats/getByRemoteJid/{tenantId}/{agentId}/{remoteJid}": {
+      get: {
+        summary: "Get Chat by Remote JID with Messages",
+        description: "Retrieves a specific chat conversation by its WhatsApp remote JID (phone number) along with the complete message history. This endpoint finds the chat associated with the given remoteJid for the specified tenant and agent, then returns both the chat details and all messages in chronological order. This is useful for retrieving conversation history when you only have the customer's WhatsApp number.",
+        security: [],
+        parameters: [
+          {
+            name: "tenantId",
+            in: "path",
+            required: true,
+            schema: { type: "number" },
+            description: "ID of the tenant (company)",
+          },
+          {
+            name: "agentId",
+            in: "path",
+            required: true,
+            schema: { type: "number" },
+            description: "ID of the agent assigned to the chat",
+          },
+          {
+            name: "remoteJid",
+            in: "path",
+            required: true,
+            schema: { type: "string" },
+            description: "WhatsApp remote JID (phone number) of the customer",
+          },
+        ],
+        responses: {
+          200: {
+            description: "Chat and messages retrieved successfully",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    id: { type: "number" },
+                    tenantId: { type: "number" },
+                    remoteJid: { type: "string" },
+                    customerName: { type: "string" },
+                    status: { type: "string" },
+                    assignedAgentId: { type: "number" },
+                    unreadCount: { type: "number" },
+                    lastMessageAt: { type: "string", format: "date-time" },
+                    createdAt: { type: "string", format: "date-time" },
+                    messages: {
+                      type: "array",
+                      items: { $ref: "#/components/schemas/Message" },
+                      description: "All messages in the chat, ordered chronologically",
+                    },
+                  },
+                },
+              },
+            },
+          },
+          400: {
+            description: "Missing required parameters (tenantId, agentId, or remoteJid)",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/Error" },
+              },
+            },
+          },
+          404: {
+            description: "Chat not found for this remoteJid, or tenant/agent not found",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/Error" },
+              },
+            },
+          },
+          500: {
+            description: "Internal server error while fetching chat data",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/Error" },
+              },
+            },
+          },
+        },
+      },
+      post: {
+        summary: "Create or Get Chat by Remote JID",
+        description: "Creates a new chat conversation for a specific customer (identified by remoteJid) if it doesn't exist, or returns the existing chat if it does. This endpoint ensures there's always a chat record for a customer-agent pair, making it safe to call before sending messages. The chat will be assigned to the specified agent and tenant.",
+        security: [],
+        parameters: [
+          {
+            name: "tenantId",
+            in: "path",
+            required: true,
+            schema: { type: "number" },
+            description: "ID of the tenant (company)",
+          },
+          {
+            name: "agentId",
+            in: "path",
+            required: true,
+            schema: { type: "number" },
+            description: "ID of the agent to assign the chat to",
+          },
+          {
+            name: "remoteJid",
+            in: "path",
+            required: true,
+            schema: { type: "string" },
+            description: "WhatsApp remote JID (phone number) of the customer",
+          },
+        ],
+        requestBody: {
+          required: false,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  customerName: {
+                    type: "string",
+                    description: "Optional customer name to associate with the chat"
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          200: {
+            description: "Existing chat found and returned",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/Chat" },
+              },
+            },
+          },
+          201: {
+            description: "New chat created successfully",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/Chat" },
+              },
+            },
+          },
+          400: {
+            description: "Missing required parameters or invalid input",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/Error" },
+              },
+            },
+          },
+          404: {
+            description: "Tenant or agent not found",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/Error" },
+              },
+            },
+          },
+          500: {
+            description: "Internal server error while creating or retrieving chat",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/Error" },
+              },
+            },
+          },
+        },
+      },
+    },
+
+    "/api/open/chats/sendMessageByRemoteJid/{tenantId}/{agentId}/{remoteJid}": {
+      post: {
+        summary: "Send WhatsApp Message by Remote JID",
+        description: "Sends a text message to a WhatsApp number (remoteJid) using a specific agent. This endpoint automatically creates a chat if one doesn't exist for the remoteJid, then sends the message via WhatsApp. The message is saved to the database asynchronously, and real-time updates are sent to connected clients. This is similar to sendMessageNoAuth but uses remoteJid instead of chatId, making it perfect for direct messaging to WhatsApp numbers.",
+        security: [],
+        parameters: [
+          {
+            name: "tenantId",
+            in: "path",
+            required: true,
+            schema: { type: "number" },
+            description: "ID of the tenant (company)",
+          },
+          {
+            name: "agentId",
+            in: "path",
+            required: true,
+            schema: { type: "number" },
+            description: "ID of the WhatsApp agent sending the message",
+          },
+          {
+            name: "remoteJid",
+            in: "path",
+            required: true,
+            schema: { type: "string" },
+            description: "WhatsApp remote JID (phone number) of the recipient",
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  content: {
+                    type: "string",
+                    description: "Text message content to send via WhatsApp"
+                  },
+                },
+                required: ["content"],
+              },
+            },
+          },
+        },
+        responses: {
+          201: {
+            description: "Message sent successfully (temporary message ID returned, actual save happens asynchronously)",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    id: { type: "string", description: "Temporary message ID" },
+                    chatId: { type: "number", description: "ID of the chat" },
+                    tenantId: { type: "number", description: "ID of the tenant" },
+                    content: { type: "string", description: "Message content" },
+                    type: { type: "string", description: "Message type (text)" },
+                    fromMe: { type: "boolean", description: "True for outgoing messages" },
+                    senderName: { type: "string", description: "Sender name" },
+                    timestamp: { type: "string", format: "date-time", description: "Message timestamp" },
+                    isSaving: { type: "boolean", description: "True while message is being saved to database" },
+                  },
+                },
+              },
+            },
+          },
+          400: {
+            description: "Missing required parameters or invalid message content",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/Error" },
+              },
+            },
+          },
+          404: {
+            description: "Tenant or agent not found",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/Error" },
+              },
+            },
+          },
+          503: {
+            description: "WhatsApp client not available or not connected",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/Error" },
+              },
+            },
+          },
+          500: {
+            description: "Internal server error while sending message",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/Error" },
+              },
+            },
+          },
+        },
+      },
+    },
+
     "/api/chats/sendMessageNoAuth/{agentId}/{id}": {
   "post": {
     "summary": "Send WhatsApp Message without Authentication",

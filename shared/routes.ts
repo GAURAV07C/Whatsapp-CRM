@@ -173,6 +173,34 @@ export const api = {
     method: "DELETE",
     path: "/api/open/chats/:tenantId/:agentId/:chatId",
   },
+
+  getByRemoteJid: {
+    method: "GET",
+    path: "/api/open/chats/getByRemoteJid/:tenantId/:agentId/:remoteJid",
+    responses: {
+      200: z.custom<
+        typeof chats.$inferSelect & {
+          messages: (typeof messages.$inferSelect)[];
+        }
+      >(),
+      404: errorSchemas.notFound,
+    },
+  },
+  sendMessageByRemoteJid: {
+    method: "POST",
+    path: "/api/open/chats/sendMessageByRemoteJid/:tenantId/:agentId/:remoteJid",
+    input: z.object({
+      content: z.string(),
+    }),
+    responses: {
+      201: z.custom<typeof messages.$inferSelect>(),
+      400: errorSchemas.validation,
+      404: errorSchemas.notFound,
+      503: z.object({
+        message: z.string(),
+      }),
+    },
+  },
 }
 
   },
